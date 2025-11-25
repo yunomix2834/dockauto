@@ -6,10 +6,10 @@ VERSION="0.1.0"
 INSTALL_DIR="/usr/local/bin"
 BINARY_NAME="dockauto"
 
-# Temp
-TEMP_DIR=${mktemp -d}
-
 echo "Installing: ${BINARY_NAME} v${VERSION}..."
+
+# Temp
+TEMP_DIR="$(mktemp -d)"
 
 # 1. Create Temp Folder
 trap 'rm -rf "$TEMP_DIR"' EXIT

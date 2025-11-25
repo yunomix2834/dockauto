@@ -175,7 +175,7 @@ networks:
     + Install / Update: 
         Script:
         Binary versioning: 
-            dockauto --versio
+            dockauto --version
             dockauto self-update (FUTURE)
     + Template: 
         dockauto init --lang node

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-docker_cmd_init_help_usage() {
+dockauto_cmd_init_usage() {
   cat <<'EOF'
 Usage: dockauto init [--lang <node|python|java|...>] [--from-compose <file>] [--force]
 
@@ -30,25 +30,21 @@ docker_cmd_init() {
         lang="${2:-}"
         shift 2
         ;;
-
       --from-compose)
         from_compose="${2:-}"
         shift 2
         ;;
-
       --force)
         force=1
         shift
         ;;
-
       -h|--help)
-        docker_cmd_init_help_usage
+        docker_cmd_init_usage
         return 0
         ;;
-
       *)
         log_error "Unknown option for init: $1"
-        docker_cmd_init_help_usage
+        docker_cmd_init_usage
         return 1
         ;;
     esac
@@ -66,7 +62,7 @@ docker_cmd_init() {
     dockauto_init_from_lang "$lang" "$force"
   else
     log_error "You must specify either --lang or --from-compose."
-    docker_cmd_init_help_usage
+    docker_cmd_init_usage
     return 1
   fi
 }
@@ -111,9 +107,9 @@ dockauto_init_from_compose() {
   log_info "Generating ${target_file} from ${compose_file} ..."
 
   # Copy compose to dockauto.yml
-  # Append x-dockauto skeleton (User custom)
   cp "$compose_file" "${target_file}"
 
+  # Append x-dockauto skeleton (User custom)
   cat >>"$target_file" <<'EOF'
 
 # ==== x-dockauto metadata (added by dockauto init --from-compose) ====

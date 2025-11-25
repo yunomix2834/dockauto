@@ -8,7 +8,17 @@ _blue='\033[0;34m'
 _green='\033[0;32m'
 _reset='\033[0m'
 
+# Set DOCKAUTO_VERBOSE, DOCKAUTO_QUIET in cli
+log_debug() {
+  if [[ "${DOCKAUTO_VERBOSE:-0}" -eq 1 ]]; then
+    printf "${_blue}[DEBUG]${_reset} %s\n" "$*" >&2
+  fi
+}
+
 log_info() {
+  if [[ "${DOCKAUTO_QUIET:-0}" -eq 1 ]]; then
+    return 0
+  fi
   printf "${_blue}[INFO]${_reset} %s\n" "$*" >&2
 }
 

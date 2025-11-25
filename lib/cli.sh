@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-dockauto_help_usage() {
+dockauto_usage() {
   cat <<'EOF'
 
-Usage: dockauto <command> [options]
+Usage: dockauto [global options] <command> [command options]
 
 Commands:
   init      Generate dockauto.yml template
@@ -21,7 +21,12 @@ Global options:
   --verbose         Enable debug logs
   --quiet           Minimal output
 
-Run 'dockauto <command> --help' for command-specific options.
+Examples:
+  dockauto init --lang node
+  dockauto build --skip-test --no-scan
+  dockauto test --test integration
+  dockauto up --keep-infra
+
 EOF
 }
 
@@ -31,9 +36,54 @@ dockauto_main() {
   local verbose=0
   local quiet=0
 
-  # Take first subcommand (if not exist -> help)
-  local cmd="${1:-help}"
-  shift || true
+  # Parse global flags (if not exist -> help)
+  # Only before sub-command
+  local cmd=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --config)
+        global_config="${2:-}"
+        shift 2
+        ;;
+      --profile)
+        global_profile="${2:-}"
+        shift 2
+        ;;
+      --verbose)
+        verbose=1
+        shift
+        ;;
+      --quiet)
+        quiet=1
+        shift
+        ;;
+      help|-h|--help|version|-v|--version|init|build|test|up|down)
+        cmd="$1"
+        shift
+        break
+        ;;
+      *)
+        log_error "Unknown global option or command: $1"
+        dockauto_usage
+        exit 1
+        ;;
+    esac
+  done
+
+  # Set default cmd if not exist
+  if [[ -z "${cmd}" ]]; then
+    cmd="help"
+  fi
+
+  # Export global context for lib usage
+  export DOCKAUTO_CONFIG_FILE="${global_config}"
+  export DOCKAUTO_PROFILE="${global_profile}"
+  export DOCKAUTO_VERBOSE="${verbose}"
+  export DOCKAUTO_QUIET="${quiet}"
+
+  log_debug "Global config file: ${DOCKAUTO_CONFIG_FILE}"
+  log_debug "Global profile: ${DOCKAUTO_PROFILE}"
+  log_debug "Verbose: ${DOCKAUTO_VERBOSE}, Quiet: ${DOCKAUTO_QUIET}"
 
   case "$cmd" in
     version|-v|--version)
@@ -42,37 +92,41 @@ dockauto_main() {
       ;;
 
     help|-h|--help)
-      dockauto_help_usage
+      dockauto_usage
       exit 0
       ;;
 
     init)
-      # STEP 0: generate template
+      # STEP 0
       source "${DOCKAUTO_ROOT_DIR}/lib/init.sh"
       dockauto_cmd_init "$@"
       ;;
 
     build)
-      echo "TODO: dockauto build (Step 1+)" >&2
+      # STEP 1: parse build flags + prepare pipeline
+      source "${DOCKAUTO_ROOT_DIR}/lib/build.sh"
+      dockauto_cmd_build "$@"
       ;;
 
     test)
-      echo "TODO: dockauto test (Step 1+)" >&2
+      source "${DOCKAUTO_ROOT_DIR}/lib/test.sh"
+      dockauto_cmd_test "$@"
       ;;
 
     up)
-      echo "TODO: dockauto up (Step 1+)" >&2
+      source "${DOCKAUTO_ROOT_DIR}/lib/infra.sh"
+      dockauto_cmd_up "$@"
       ;;
 
     down)
-      echo "TODO: dockauto down (Step 1+)" >&2
+      source "${DOCKAUTO_ROOT_DIR}/lib/infra.sh"
+      dockauto_cmd_down "$@"
       ;;
 
     *)
       log_error "Unknown command: ${cmd}"
-      dockauto_help_usage
+      dockauto_usage
       exit 1
       ;;
-
   esac
 }
