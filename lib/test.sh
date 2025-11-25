@@ -48,6 +48,13 @@ dockauto_cmd_test() {
     esac
   done
 
+  # Export context
+  export DOCKAUTO_REQUIRE_INFRA="${require_infra}"
+  export DOCKAUTO_IGNORE_TEST_FAILURE="${ignore_test_failure}"
+  export DOCKAUTO_TEST_SUITES="${test_suites}"
+  export DOCKAUTO_SKIP_TEST="0"
+  export DOCKAUTO_NO_SCAN="1"   # test but not scan
+
   log_debug "test: require_infra=${require_infra}"
   log_debug "test: ignore_test_failure=${ignore_test_failure}"
   log_debug "test: test_suites=${test_suites}"
@@ -62,6 +69,7 @@ dockauto_cmd_test() {
   dockauto_validate_environment
   dockauto_validate_config
 
+  log_info "Starting test pipeline (Step 7/8 in future)."
   log_info "Starting test pipeline (Step 2+ not implemented yet)."
   log_info "Config file: ${DOCKAUTO_CONFIG_FILE}, profile: ${DOCKAUTO_PROFILE:-default}"
 
@@ -73,5 +81,8 @@ dockauto_cmd_test() {
     log_info "Test failures will not fail the command (ignore-test-failure)."
   fi
 
-  # TODO: Step 7,8: infra_up + run_tests + (optional) cleanup
+  # TODO:
+  #   - infra_up_for_tests
+  #   - run_tests
+  #   - optional cleanup
 }

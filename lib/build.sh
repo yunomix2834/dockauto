@@ -66,6 +66,13 @@ dockauto_cmd_build() {
     esac
   done
 
+  # Export context for Step 2
+  export DOCKAUTO_REQUIRE_INFRA="${require_infra}"
+  export DOCKAUTO_SKIP_TEST="${skip_test}"
+  export DOCKAUTO_IGNORE_TEST_FAILURE="${ignore_test_failure}"
+  export DOCKAUTO_NO_SCAN="${no_scan}"
+  export DOCKAUTO_TEST_SUITES="${test_suites}"
+
   log_debug "build: require_infra=${require_infra}"
   log_debug "build: skip_test=${skip_test}"
   log_debug "build: ignore_test_failure=${ignore_test_failure}"
@@ -82,6 +89,9 @@ dockauto_cmd_build() {
   dockauto_validate_environment
   dockauto_validate_config
 
+  log_info "Starting build pipeline (HASH -> BUILD -> SCAN -> INFRA -> TEST -> CLEANUP in future steps)."
+  log_info "Config file: ${DOCKAUTO_CONFIG_FILE}, profile: ${DOCKAUTO_PROFILE:-default}"
+
   #   - HASH:    dockauto_build_calculate_hash ...
   #   - BUILD:   dockauto_build_image ...
   #   - SCAN:    dockauto_scan_image ...
@@ -89,19 +99,16 @@ dockauto_cmd_build() {
   #   - TEST:    dockauto_run_tests ...
   #   - CLEANUP: dockauto_infra_cleanup ...
 
-  log_info "Starting build pipeline (Step 2+ not implemented yet)."
-  log_info "Config file: ${DOCKAUTO_CONFIG_FILE}, profile: ${DOCKAUTO_PROFILE:-default}"
-
   if [[ "${skip_test}" -eq 1 ]]; then
     log_info "Tests will be skipped."
   else
-    log_info "Tests will be run (suites: ${test_suites:-<from config>})."
+    log_info "Tests will be run (suites: ${DOCKAUTO_EFFECTIVE_TEST_SUITES:-<from config>})."
   fi
 
   if [[ "${no_scan}" -eq 1 ]]; then
     log_info "Security scan will be skipped."
   else
-    log_info "Security scan will run."
+    log_info "Security scan will run (if tools available)."
   fi
 
   if [[ "${require_infra}" -eq 1 ]]; then
@@ -112,5 +119,11 @@ dockauto_cmd_build() {
     log_info "Test failures will not fail the build (ignore-test-failure)."
   fi
 
-  # TODO: call actual state machine here in Step 2+
+  # TODO (Step 3+):
+  #   - dockauto_build_calculate_hash
+  #   - dockauto_build_image
+  #   - dockauto_scan_image (nếu DOCKAUTO_SCAN_AVAILABLE=1)
+  #   - dockauto_infra_up_for_tests
+  #   - dockauto_run_tests
+  #   - dockauto_infra_cleanup
 }

@@ -313,3 +313,7 @@ networks:
     + Naming conversion to avoid delete mistake: dockauto_test_<hash>_db
     + Avoid delete mistake container dev. Dev infra: dockauto_dev_db
   - trap if script Ctrl+C will clean.
+
+!Notice:
+- Pin version
+- Comment Step -> Clean code

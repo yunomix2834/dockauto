@@ -36,7 +36,7 @@ dockauto_main() {
   local verbose=0
   local quiet=0
 
-  # Parse global flags (if not exist -> help)
+  # Parse global flags
   # Only before sub-command
   local cmd=""
   while [[ $# -gt 0 ]]; do

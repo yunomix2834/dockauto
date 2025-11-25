@@ -60,12 +60,17 @@ dockauto_cmd_up() {
   log_debug "up: port_spec=${port_spec}"
   log_debug "up: network_name=${network_name}"
 
-  source "${DOCKAUTO_ROOT_DIR}/lib/config.sh"
-  source "${DOCKAUTO_ROOT_DIR}/lib/validate.sh"
+  # up not related to test/scan -> set context default
+  export DOCKAUTO_REQUIRE_INFRA="0"
+  export DOCKAUTO_SKIP_TEST="1"
+  export DOCKAUTO_NO_SCAN="1"
 
   # ====== Step 1 END ======
 
   # ====== Step 2 VALIDATE config + environment ======
+  source "${DOCKAUTO_ROOT_DIR}/lib/config.sh"
+  source "${DOCKAUTO_ROOT_DIR}/lib/validate.sh"
+
   dockauto_config_load "${DOCKAUTO_CONFIG_FILE}" "${DOCKAUTO_PROFILE}"
   dockauto_validate_environment
   dockauto_validate_config
@@ -85,7 +90,10 @@ dockauto_cmd_up() {
     log_info "Infra will be kept after up (no auto teardown)."
   fi
 
-  # TODO Step 7: infra_up_dev + Step 9 (teardown) nếu không keep
+  # TODO:
+  #   - create networks/containers for infra services (role=infra)
+  #   - healthcheck loop
+  #   - handle naming: dockauto_dev_<service>
 }
 
 dockauto_cmd_down() {
