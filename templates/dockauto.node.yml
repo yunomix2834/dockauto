@@ -1,0 +1,150 @@
+# templates/dockauto.node.yml
+
+version: "3.9"
+
+# ==== DOCKAUTO META (ROOT) ====
+x-dockauto:
+  project:
+    name: my_app
+    main_service: app
+    language: node
+    language_version: "22"
+
+  build:
+    lockfiles:
+      - package-lock.json
+    # dockerfile_template: node
+
+  tests:
+    enabled: true
+    default_suites: ["unit"]
+    suites:
+      unit:
+        cmd: "npm test"
+        requires_infra: []
+      integration:
+        cmd: "npm run test:integration"
+        requires_infra: ["db", "redis"]
+
+  security:
+    scan:
+      enabled: true
+      tool: trivy
+      fail_on: ["CRITICAL","HIGH"]
+      output: "reports/security"
+    sbom:
+      enabled: true
+      tool: syft
+      format: "spdx-json"
+      output: "reports/sbom"
+
+  profiles:
+    dev:
+      description: "Local development"
+    ci:
+      description: "CI pipeline build + full tests"
+
+# ==== COMMON ANCHORS ====
+x-common-environment: &default-env
+  APP_ENV: development
+  TZ: Asia/Ho_Chi_Minh
+
+x-common-labels: &default-labels
+  maintainer: "your_name"
+  project: "my_app"
+
+# ==== SERVICES ====
+services:
+  app:
+    container_name: myapp-app
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NODE_ENV: development
+    image: myapp:latest
+    restart: unless-stopped
+    command: ["npm", "run", "start"]
+    ports:
+      - "8080:3000"
+    environment:
+      <<: *default-env
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: myapp
+      DB_PASSWORD: secret
+      DB_NAME: myapp_db
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    env_file:
+      - .env
+    volumes:
+      - ./:/usr/src/app
+      - app_logs:/var/log/myapp
+    depends_on:
+      - db
+      - redis
+    networks:
+      - backend
+      - frontend
+    labels:
+      <<: *default-labels
+      component: "backend"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    x-dockauto:
+      role: app
+      test_target: true
+      optimize_build: true
+
+  db:
+    image: postgres:16
+    container_name: myapp-db
+    environment:
+      POSTGRES_DB: myapp_db
+      POSTGRES_USER: myapp
+      POSTGRES_PASSWORD: secret
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U myapp -d myapp_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    x-dockauto:
+      role: infra
+      type: postgres
+
+  redis:
+    image: redis:7
+    container_name: myapp-redis
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    x-dockauto:
+      role: infra
+      type: redis
+
+volumes:
+  db_data:
+  redis_data:
+  app_logs:
+  nginx_logs:
+
+networks:
+  backend:
+    driver: bridge
+  frontend:
+    driver: bridge

@@ -31,8 +31,8 @@ dockauto_main() {
   local verbose=0
   local quiet=0
 
-  # Take first subcommand (if not exist -> help_
-  local cmd="&{1:-help}"
+  # Take first subcommand (if not exist -> help)
+  local cmd="${1:-help}"
   shift || true
 
   case "$cmd" in
@@ -47,7 +47,7 @@ dockauto_main() {
       ;;
 
     init)
-      # STEP 0
+      # STEP 0: generate template
       source "${DOCKAUTO_ROOT_DIR}/lib/init.sh"
       dockauto_cmd_init "$@"
       ;;
