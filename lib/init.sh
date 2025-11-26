@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ====== Step 0: Init - generate dockauto.yml template ======
+
 dockauto_cmd_init_usage() {
   cat <<'EOF'
 Usage: dockauto init [--lang <node|python|java|...>] [--from-compose <file>] [--force]
@@ -71,7 +73,6 @@ dockauto_init_from_lang() {
   local lang="$1"
   local force="$2"
   local target_file="dockauto.yml"
-
   local template_file="${DOCKAUTO_ROOT_DIR}/templates/dockauto.${lang}.yml"
 
   if [[ ! -f "$template_file" ]]; then

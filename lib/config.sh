@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ====== Step 2: Read & parse dockauto.yml (using yq + jq) ======
+# Convert YAML -> JSON
+# Extract x-dockauto.* to env variables
+
 dockauto_config_load() {
   local config_file="$1"
   # Profile: dev, ci, etc
@@ -63,6 +67,10 @@ dockauto_config_load() {
   local suites_json
   suites_json="$(jq -r '."x-dockauto".tests.suites // {}' "$json_file")"
 
+  export DOCKAUTO_CFG_TESTS_ENABLED="${tests_enabled}"
+  export DOCKAUTO_CFG_TESTS_DEFAULT_SUITES="${default_suites}"
+  export DOCKAUTO_CFG_TESTS_SUITES_JSON="${suites_json}"
+
   # === Security ===
   local scan_enabled sbom_enabled scan_tool sbom_tool scan_fail_on
   scan_enabled="$(jq -r '."x-dockauto".security.scan.enabled // false' "$json_file")"
@@ -94,6 +102,10 @@ dockauto_config_load() {
   local main_build_context
   main_build_context="$(jq -r ".services[\"${main_service}\"].build.context // \"\"" "$json_file" 2>/dev/null || echo "")"
   export DOCKAUTO_CFG_MAIN_BUILD_CONTEXT="${main_build_context}"
+
+  local main_dockerfile
+  main_dockerfile="$(jq -r ".services[\"${main_service}\"].build.dockerfile // \"Dockerfile\"" "$json_file" 2>/dev/null || echo "Dockerfile")"
+  export DOCKAUTO_CFG_MAIN_DOCKERFILE="${main_dockerfile}"
 
   log_debug "Loaded config: project='${DOCKAUTO_CFG_PROJECT_NAME}', language=${DOCKAUTO_CFG_LANGUAGE}, main_service=${DOCKAUTO_CFG_MAIN_SERVICE}"
 }

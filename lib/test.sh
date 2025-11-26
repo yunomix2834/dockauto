@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# dockauto test:
+#   Step 1: parse test flags
+#   Step 2: VALIDATE config + environment
+#   Step 7/8: (future) infra + run tests
+
 dockauto_cmd_test_usage() {
   cat <<'EOF'
 Usage: dockauto test [options]
@@ -18,6 +23,7 @@ EOF
 }
 
 dockauto_cmd_test() {
+  # ====== Step 1: Parse flags ======
   local require_infra=0
   local ignore_test_failure=0
   local test_suites=""   # "unit,integration"
@@ -59,8 +65,6 @@ dockauto_cmd_test() {
   log_debug "test: ignore_test_failure=${ignore_test_failure}"
   log_debug "test: test_suites=${test_suites}"
 
-  # ====== Step 1 END ======
-
   # ====== Step 2 VALIDATE config + environment ======
   source "${DOCKAUTO_ROOT_DIR}/lib/config.sh"
   source "${DOCKAUTO_ROOT_DIR}/lib/validate.sh"
@@ -69,9 +73,9 @@ dockauto_cmd_test() {
   dockauto_validate_environment
   dockauto_validate_config
 
-  log_info "Starting test pipeline (Step 7/8 in future)."
-  log_info "Starting test pipeline (Step 2+ not implemented yet)."
+  log_info "Starting test pipeline (Step 7/8 not implemented yet)."
   log_info "Config file: ${DOCKAUTO_CONFIG_FILE}, profile: ${DOCKAUTO_PROFILE:-default}"
+  log_info "Suites: ${DOCKAUTO_EFFECTIVE_TEST_SUITES:-<from config>}"
 
   if [[ "${require_infra}" -eq 1 ]]; then
     log_info "Infra (db/broker) will be required for tests."

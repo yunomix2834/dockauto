@@ -2,7 +2,11 @@
 set -euo pipefail
 
 # dockauto build:
-# - FUTURE CALL state machine: VALIDATE -> HASH -> BUILD -> SCAN -> INFRA -> TEST -> CLEANUP
+#   FUTURE CALL state machine: VALIDATE -> HASH -> BUILD -> SCAN -> INFRA -> TEST -> CLEANUP
+#   Step 1: CLI & build flags
+#   Step 2: VALIDATE (config + environment)
+#   Step 3: HASH (CONFIG/SOURCE/BUILD + cache check)
+#   Step 4+: BUILD, SCAN, INFRA, TEST, CLEANUP (future)
 
 dockauto_cmd_build_usage() {
   cat <<'EOF'
@@ -24,6 +28,7 @@ EOF
 }
 
 dockauto_cmd_build() {
+  # ====== Step 1: Parse build flags ======
   local require_infra=0
   local skip_test=0
   local ignore_test_failure=0
@@ -79,8 +84,6 @@ dockauto_cmd_build() {
   log_debug "build: no_scan=${no_scan}"
   log_debug "build: test_suites=${test_suites}"
 
-  # ====== Step 1 END ======
-
   # ====== Step 2 VALIDATE config + environment ======
   source "${DOCKAUTO_ROOT_DIR}/lib/config.sh"
   source "${DOCKAUTO_ROOT_DIR}/lib/validate.sh"
@@ -89,15 +92,32 @@ dockauto_cmd_build() {
   dockauto_validate_environment
   dockauto_validate_config
 
+  # ====== Step 3: HASH (CONFIG / SOURCE / BUILD + cache check) ======
+  source "${DOCKAUTO_ROOT_DIR}/lib/hash.sh"
+
+  dockauto_hash_calculate
+  dockauto_hash_check_cache
+
+  log_info "CONFIG_HASH: ${DOCKAUTO_CONFIG_HASH}"
+  log_info "SOURCE_HASH: ${DOCKAUTO_SOURCE_HASH}"
+  log_info "BUILD_HASH : ${DOCKAUTO_BUILD_HASH}"
+  log_info "Template version: ${DOCKAUTO_TEMPLATE_VERSION}"
+
+  if [[ "${DOCKAUTO_CACHE_HIT:-0}" -eq 1 ]]; then
+    log_info "Cache: HIT (existing entry in .dockauto/cache.json for this BUILD_HASH)."
+  else
+    log_info "Cache: MISS (no entry for this BUILD_HASH, will build new image in Step 5)."
+  fi
+
+  # ====== Step 4+ (Not implement) ======
+  #   - BUILD:   docker build ...
+  #   - SCAN:    dockauto_scan_image ...
+  #   - INFRA:   infra up for tests ...
+  #   - TEST:    run test suites ...
+  #   - CLEANUP: infra teardown ...
+
   log_info "Starting build pipeline (HASH -> BUILD -> SCAN -> INFRA -> TEST -> CLEANUP in future steps)."
   log_info "Config file: ${DOCKAUTO_CONFIG_FILE}, profile: ${DOCKAUTO_PROFILE:-default}"
-
-  #   - HASH:    dockauto_build_calculate_hash ...
-  #   - BUILD:   dockauto_build_image ...
-  #   - SCAN:    dockauto_scan_image ...
-  #   - INFRA:   dockauto_infra_up_for_tests ...
-  #   - TEST:    dockauto_run_tests ...
-  #   - CLEANUP: dockauto_infra_cleanup ...
 
   if [[ "${skip_test}" -eq 1 ]]; then
     log_info "Tests will be skipped."
@@ -118,12 +138,4 @@ dockauto_cmd_build() {
   if [[ "${ignore_test_failure}" -eq 1 ]]; then
     log_info "Test failures will not fail the build (ignore-test-failure)."
   fi
-
-  # TODO (Step 3+):
-  #   - dockauto_build_calculate_hash
-  #   - dockauto_build_image
-  #   - dockauto_scan_image (nếu DOCKAUTO_SCAN_AVAILABLE=1)
-  #   - dockauto_infra_up_for_tests
-  #   - dockauto_run_tests
-  #   - dockauto_infra_cleanup
 }

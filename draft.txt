@@ -1,0 +1,1870 @@
+install.sh
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Install
+VERSION="0.1.0"
+INSTALL_DIR="/usr/local/bin"
+BINARY_NAME="dockauto"
+
+echo "Installing: ${BINARY_NAME} v${VERSION}..."
+
+# Temp
+TEMP_DIR="$(mktemp -d)"
+
+# 1. Create Temp Folder
+trap 'rm -rf "$TEMP_DIR"' EXIT
+
+# 2. Download binary / script
+curl -fsSL "https://raw.githubusercontent.com/you/dockauto/v${VERSION}/bin/dockauto" -o "${TEMP_DIR}/${BINARY_NAME}"
+
+# Grant execute mode to file
+chmod +x "${TEMP_DIR}/${BINARY_NAME}"
+
+# 3. Move to INSTALL_DIR
+sudo mv "${TEMP_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"
+
+echo "Installed ${BINARY_NAME} to ${INSTALL_DIR}/${BINARY_NAME}"
+echo "Run: dockauto --version to view the version"
+
+
+diagram.md
+Project name: dockauto
+Purpose: This project was built to auto build container in dev environment
+State machine: INIT -> VALIDATE -> HASH -> BUILD -> SCAN -> INFRA -> TEST -> CLEANUP
+Steps in flows:
+- Step 0: We need some way that user can download this project's lib and user can cli to generate a "Project's Template" to define configurations.
+  - This template was designed similarly Docker Compose yaml file
+
+```yml
+version: "3.9"
+
+# ==== DOCKAUTO META (ROOT) ====
+x-dockauto:
+  project:
+    name: my_app
+    main_service: app
+    language: node
+    language_version: "22"
+
+  build:
+    lockfiles:
+      - package-lock.json
+    # nếu muốn ép dùng template thay vì Dockerfile có sẵn:
+    # dockerfile_template: node
+
+  tests:
+    enabled: true
+    default_suites: ["unit"]
+    suites:
+      unit:
+        cmd: "npm test"
+        requires_infra: []
+      integration:
+        cmd: "npm run test:integration"
+        requires_infra: ["db", "redis"]
+
+  security:
+    scan:
+      enabled: true
+      tool: trivy
+      fail_on: ["CRITICAL","HIGH"]
+      output: "reports/security"
+    sbom:
+      enabled: true
+      tool: syft
+      format: "spdx-json"
+      output: "reports/sbom"
+
+  profiles:
+    dev:
+      description: "Local development"
+    ci:
+      description: "CI pipeline build + full tests"
+
+# ==== COMMON ANCHORS ====
+x-common-environment: &default-env
+  APP_ENV: development
+  TZ: Asia/Ho_Chi_Minh
+
+x-common-labels: &default-labels
+  maintainer: "your_name"
+  project: "my_app"
+
+# ==== SERVICES ====
+services:
+  app:
+    container_name: myapp-app
+
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NODE_ENV: development
+
+    image: myapp:latest
+    restart: unless-stopped
+
+    command: ["npm", "run", "start"]
+
+    ports:
+      - "8080:3000"
+
+    environment:
+      <<: *default-env
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: myapp
+      DB_PASSWORD: secret
+      DB_NAME: myapp_db
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+
+    env_file:
+      - .env
+
+    volumes:
+      - ./:/usr/src/app
+      - app_logs:/var/log/myapp
+
+    depends_on:
+      - db
+      - redis
+
+    networks:
+      - backend
+      - frontend
+
+    labels:
+      <<: *default-labels
+      component: "backend"
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+    # Metadata cho dockauto.sh riêng cho service app
+    x-dockauto:
+      role: app              # đánh dấu đây là service chính
+      test_target: true      # service này dùng để chạy test (docker run ...)
+      optimize_build: true   # sau này dùng cho step 4.5
+
+  db:
+    image: postgres:16
+    container_name: myapp-db
+    environment:
+      POSTGRES_DB: myapp_db
+      POSTGRES_USER: myapp
+      POSTGRES_PASSWORD: secret
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U myapp -d myapp_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    x-dockauto:
+      role: infra
+      type: postgres
+
+  redis:
+    image: redis:7
+    container_name: myapp-redis
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    x-dockauto:
+      role: infra
+      type: redis
+
+# ====== VOLUMES ======
+volumes:
+  db_data:
+  redis_data:
+  app_logs:
+  nginx_logs:
+
+# ====== NETWORKS =====
+networks:
+  backend:
+    driver: bridge
+  frontend:
+    driver: bridge
+```
+
+    + Install / Update:
+        Script:
+        Binary versioning:
+            dockauto --version
+            dockauto self-update (FUTURE)
+    + Template:
+        dockauto init --lang node
+        dockauto init --lang python
+        dockauto init --from-compose docker-compose.yml (import from compose to generate dockauto.yml)
+    + Doc in template
+        comment -> user easily to edit
+
+- Step 1: CLI and parse arugment:
+  - This step want to know what user thinks, retrieve command from "dockauto.yml" and execute.
+  - This lib expected be:
+    dockauto/
+        bin/dockauto
+        lib/cli.sh
+            + GLOBAL:
+                + --profile
+                + --verbose: log debug
+                + --quiet
+                + --config
+            + FLAG:
+                + yq mean parse yml. jq mean parse yml -> json
+                + BUILD
+                  + --infra (Check in step 2)
+                  + --skip-test (Check in step 2) -> if false then will not test
+                  + --ignore-test-failure -> warning if does not pass the test
+                  + --no-scan (vulnerability and Check & install in step 2)
+                  + --test -> unit or integration
+                + UP
+                  + --keep-infra -> default (false)
+            + EXTENDS:
+                + -p 8080: to check port has been used or not
+                + -n <network_name>: to check network in docker has been used or not
+
+        lib/config.sh
+        lib/validate.sh
+        lib/build.sh
+        lib/infra.sh
+        lib/test.sh
+        lib/scan.sh
+        lib/utils.sh: log_debug, log_info, log_warn, log_error with color.
+        ...
+  - Set "set -euo pipefail", "--" to more safely
+  - CLI: subcommand:
+    + dockauto template / init
+    + dockauto build
+    + dockauto test
+    + dockauto up/down
+
+- Step 2: Read and Validate dockauto.yml
+  - Goals: get all detail information in yml:
+    + language, context, version, dependencies, test, db/broker
+  - Check
+    + dockauto.yml: exist
+    + validate supported lang
+    + check language version, context, check and update template
+    + check essentials lib: node -> install nodejs, trivy -> install, SBOM -> install...
+      + Print suggestion install tools (But do not install directly)
+    + check test suite if --skip-test is true
+    + check infra if rqr-infra is true
+    + use jq to parse yml to json report
+
+- Step 3: Calculate build hash
+  - Goals: Decide build or reuse cache
+  - Create fingerprint
+    + Merge dockauto.yml
+    + Version template
+    + ...
+    + CONFIG_HASH = dockerauto.yml + template version
+    + SOURCE_HASH = sourcecode + lockfiles
+    + BUILD_HASH = sha256 (CONFIG_HASH + SOURCE_HASH)
+  - Calculate hash -> print
+  - Check cache (if exist)
+  - Ignore unnecessary file
+    + .dockautoignore: node_modules, tmp, log, .git
+  - Concurrent safety:
+    + When many processes concurrently build, avoid break .dockauto/cache.json -> Use file lock (flock) or atomic write
+      + Write in temp file -> mv
+
+- Step 4: Generate Dockerfile from Template
+  - If Dockerfile was designated  -> do not generate, use that file to build
+  - From language
+  - Prepare environment
+  - Versioning template
+    + # dockauto-template-version: 1
+    + Write this version in fingerprint -> when up template, hash is diff -> rebuild
+
+- Step 4.5: Automate optimize dockerfile to prepare build in step 3
+  (Cái này khả năng chưa làm luôn vì sẽ thêm các option ở cli ứng với build theo image gì để phù hợp với ngữ cảnh build)
+  + --optimize-cache (multi-stage, layer cache)
+  + --optimize-install (install deps before copy source)
+
+- Step 5: Build image (Docker)
+  - Export log + report: hash → tag → id → digest → created_at -> Format log to human readable
+  - jq to update cache file
+  - (Sau này) Support buildx / multi-arch
+
+- Step 6: Scan image with Trivy, SBOM
+    ```yml
+    security:
+      scan:
+        enabled: true
+        tool: trivy
+        fail_on: ["CRITICAL","HIGH"]
+        output: "reports/security"
+      sbom:
+        enabled: true
+        tool: syft
+        format: "spdx-json"
+        output: "reports/sbom"
+
+    ```
+  - Export report
+
+- Step 7: Provision infra for test (Database, Broker)
+  - Config db, broker service
+  - Config network, port
+    + Port conflict handling:
+      + if not assign any port -> random port -> docker inspect to retrieve port
+  - Loop healthcheck
+  - If --kep-infra = true -> test reuse -> healthcheck
+
+- Step 8: Test
+  - if --skip-test: skip this step, and log warning
+  - --test = unit, integration -> test with suite
+    + test unit before integration. If unit fail -> do not provision infra (because unit do not dependence infra)
+  - Ensure that have infra to test
+  - If suite fail
+    + default: file dockauto build
+    + if flag --ignore-test-failure = true -> warning
+  - Parallel test (FUTURE)
+  - Loop write log, export log + report -> format report
+
+- Step 9: Teardown infra
+  - if --keep-inra = false -> remove and delete container infra, network
+    + Naming conversion to avoid delete mistake: dockauto_test_<hash>_db
+    + Avoid delete mistake container dev. Dev infra: dockauto_dev_db
+  - trap if script Ctrl+C will clean.
+
+!Notice:
+- Pin version
+- Comment Step -> Clean code
+
+/bin/dockauto.sh
+#!/usr/bin/env bash
+set -euo pipefail
+
+# dockauto version
+VERSION="0.1.0"
+
+# Find project's root folder
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# Export for lib to use
+export DOCKAUTO_ROOT_DIR="${ROOT_DIR}"
+export DOCKAUTO_VERSION="${VERSION}"
+
+# Source for primary lib
+# At least we need cli & utils for Step 0
+source "${ROOT_DIR}/lib/utils.sh"
+source "${ROOT_DIR}/lib/cli.sh"
+
+dockauto_main "$@"
+
+/lib/build.sh
+#!/usr/bin/env bash
+set -euo pipefail
+
+# dockauto build:
+# - FUTURE CALL state machine: VALIDATE -> HASH -> BUILD -> SCAN -> INFRA -> TEST -> CLEANUP
+
+dockauto_cmd_build_usage() {
+  cat <<'EOF'
+Usage: dockauto build [options]
+
+Options:
+  --infra                  Require infra (db/broker) for tests
+  --skip-test              Skip running tests after build
+  --ignore-test-failure    Do not fail build if tests fail (just warn)
+  --no-scan                Skip security scan (Trivy/SBOM)
+  --test SUITES            Comma-separated test suites (e.g. "unit,integration")
+
+Examples:
+  dockauto build
+  dockauto build --skip-test --no-scan
+  dockauto build --infra --test integration
+  dockauto build --ignore-test-failure --test unit,integration
+EOF
+}
+
+dockauto_cmd_build() {
+  local require_infra=0
+  local skip_test=0
+  local ignore_test_failure=0
+  local no_scan=0
+  # "unit, integration" or null = config default
+  local test_suites=""
+
+  # Parse build-specific flags
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --infra)
+        require_infra=1
+        shift
+        ;;
+      --skip-test|--skip-tests)
+        skip_test=1
+        shift
+        ;;
+      --ignore-test-failure)
+        ignore_test_failure=1
+        shift
+        ;;
+      --no-scan)
+        no_scan=1
+        shift
+        ;;
+      --test|--tests)
+        test_suites="${2:-}"
+        shift 2
+        ;;
+      -h|--help)
+        dockauto_cmd_build_usage
+        return 0
+        ;;
+      *)
+        log_error "Unknown option for build: $1"
+        dockauto_cmd_build_usage
+        return 1
+        ;;
+    esac
+  done
+
+  # Export context for Step 2
+  export DOCKAUTO_REQUIRE_INFRA="${require_infra}"
+  export DOCKAUTO_SKIP_TEST="${skip_test}"
+  export DOCKAUTO_IGNORE_TEST_FAILURE="${ignore_test_failure}"
+  export DOCKAUTO_NO_SCAN="${no_scan}"
+  export DOCKAUTO_TEST_SUITES="${test_suites}"
+
+  log_debug "build: require_infra=${require_infra}"
+  log_debug "build: skip_test=${skip_test}"
+  log_debug "build: ignore_test_failure=${ignore_test_failure}"
+  log_debug "build: no_scan=${no_scan}"
+  log_debug "build: test_suites=${test_suites}"
+
+  # ====== Step 1 END ======
+
+  # ====== Step 2 VALIDATE config + environment ======
+  source "${DOCKAUTO_ROOT_DIR}/lib/config.sh"
+  source "${DOCKAUTO_ROOT_DIR}/lib/validate.sh"
+
+  dockauto_config_load "${DOCKAUTO_CONFIG_FILE}" "${DOCKAUTO_PROFILE}"
+  dockauto_validate_environment
+  dockauto_validate_config
+
+  log_info "Starting build pipeline (HASH -> BUILD -> SCAN -> INFRA -> TEST -> CLEANUP in future steps)."
+  log_info "Config file: ${DOCKAUTO_CONFIG_FILE}, profile: ${DOCKAUTO_PROFILE:-default}"
+
+  #   - HASH:    dockauto_build_calculate_hash ...
+  #   - BUILD:   dockauto_build_image ...
+  #   - SCAN:    dockauto_scan_image ...
+  #   - INFRA:   dockauto_infra_up_for_tests ...
+  #   - TEST:    dockauto_run_tests ...
+  #   - CLEANUP: dockauto_infra_cleanup ...
+
+  if [[ "${skip_test}" -eq 1 ]]; then
+    log_info "Tests will be skipped."
+  else
+    log_info "Tests will be run (suites: ${DOCKAUTO_EFFECTIVE_TEST_SUITES:-<from config>})."
+  fi
+
+  if [[ "${no_scan}" -eq 1 ]]; then
+    log_info "Security scan will be skipped."
+  else
+    log_info "Security scan will run (if tools available)."
+  fi
+
+  if [[ "${require_infra}" -eq 1 ]]; then
+    log_info "Infra (db/broker) will be required for tests."
+  fi
+
+  if [[ "${ignore_test_failure}" -eq 1 ]]; then
+    log_info "Test failures will not fail the build (ignore-test-failure)."
+  fi
+
+  # TODO (Step 3+):
+  #   - dockauto_build_calculate_hash
+  #   - dockauto_build_image
+  #   - dockauto_scan_image (nếu DOCKAUTO_SCAN_AVAILABLE=1)
+  #   - dockauto_infra_up_for_tests
+  #   - dockauto_run_tests
+  #   - dockauto_infra_cleanup
+}
+
+/lib/cli.sh
+#!/usr/bin/env bash
+set -euo pipefail
+
+dockauto_usage() {
+  cat <<'EOF'
+
+Usage: dockauto [global options] <command> [command options]
+
+Commands:
+  init      Generate dockauto.yml template
+  build     Build dev container image
+  test      Run tests inside built image
+  up        Start dev infrastructure
+  down      Stop dev infrastructure
+  version   Show dockauto version
+  help      Show this help
+
+Global options:
+  --config FILE     Use custom config file (default: dockauto.yml)
+  --profile NAME    Use profile (e.g., dev, ci)
+  --verbose         Enable debug logs
+  --quiet           Minimal output
+
+Examples:
+  dockauto init --lang node
+  dockauto build --skip-test --no-scan
+  dockauto test --test integration
+  dockauto up --keep-infra
+
+EOF
+}
+
+dockauto_main() {
+  local global_config="dockauto.yml"
+  local global_profile=""
+  local verbose=0
+  local quiet=0
+
+  # Parse global flags
+  # Only before sub-command
+  local cmd=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --config)
+        global_config="${2:-}"
+        shift 2
+        ;;
+      --profile)
+        global_profile="${2:-}"
+        shift 2
+        ;;
+      --verbose)
+        verbose=1
+        shift
+        ;;
+      --quiet)
+        quiet=1
+        shift
+        ;;
+      help|-h|--help|version|-v|--version|init|build|test|up|down)
+        cmd="$1"
+        shift
+        break
+        ;;
+      *)
+        log_error "Unknown global option or command: $1"
+        dockauto_usage
+        exit 1
+        ;;
+    esac
+  done
+
+  # Set default cmd if not exist
+  if [[ -z "${cmd}" ]]; then
+    cmd="help"
+  fi
+
+  # Export global context for lib usage
+  export DOCKAUTO_CONFIG_FILE="${global_config}"
+  export DOCKAUTO_PROFILE="${global_profile}"
+  export DOCKAUTO_VERBOSE="${verbose}"
+  export DOCKAUTO_QUIET="${quiet}"
+
+  log_debug "Global config file: ${DOCKAUTO_CONFIG_FILE}"
+  log_debug "Global profile: ${DOCKAUTO_PROFILE}"
+  log_debug "Verbose: ${DOCKAUTO_VERBOSE}, Quiet: ${DOCKAUTO_QUIET}"
+
+  case "$cmd" in
+    version|-v|--version)
+      echo "dockauto ${DOCKAUTO_VERSION:-unknown}"
+      exit 0
+      ;;
+
+    help|-h|--help)
+      dockauto_usage
+      exit 0
+      ;;
+
+    init)
+      # STEP 0
+      source "${DOCKAUTO_ROOT_DIR}/lib/init.sh"
+      dockauto_cmd_init "$@"
+      ;;
+
+    build)
+      # STEP 1: parse build flags + prepare pipeline
+      source "${DOCKAUTO_ROOT_DIR}/lib/build.sh"
+      dockauto_cmd_build "$@"
+      ;;
+
+    test)
+      source "${DOCKAUTO_ROOT_DIR}/lib/test.sh"
+      dockauto_cmd_test "$@"
+      ;;
+
+    up)
+      source "${DOCKAUTO_ROOT_DIR}/lib/infra.sh"
+      dockauto_cmd_up "$@"
+      ;;
+
+    down)
+      source "${DOCKAUTO_ROOT_DIR}/lib/infra.sh"
+      dockauto_cmd_down "$@"
+      ;;
+
+    *)
+      log_error "Unknown command: ${cmd}"
+      dockauto_usage
+      exit 1
+      ;;
+  esac
+}
+
+/lib/config.sh
+#!/usr/bin/env bash
+set -euo pipefail
+
+dockauto_config_load() {
+  local config_file="$1"
+  # Profile: dev, ci, etc
+  local profile="${2:-}"
+
+  if [[ ! -f "$config_file" ]]; then
+    log_error "Config file not found: ${config_file}"
+    exit 1
+  fi
+
+  # yq + jq is primary dependency for Step 2
+  if ! command -v yq >/dev/null 2>&1; then
+    log_error "Required tool 'yq' not found. Please install yq first."
+    exit 1
+  fi
+
+  if ! command -v jq >/dev/null 2>&1; then
+    log_error "Required tool 'jq' not found. Please install jq first."
+    exit 1
+  fi
+
+  mkdir -p .dockauto
+
+  local json_file=".dockauto/config.json"
+
+  log.debug "Converting YAML to JSON with yq + jq..."
+  if ! yq eval -o=json '.' "$config_file" | jq '.' > "$json_file"; then
+    log_error "Failed to parse ${config_file} via yq/jq."
+    exit 1
+  fi
+
+  export DOCKAUTO_CONFIG_JSON="${json_file}"
+  export DOCKAUTO_CFG_PROFILE_REQUESTED="${profile}"
+
+  # === Extract x-dockauto.project ===
+  local project_name
+  project_name="$(jq -r '."x-dockauto".project.name // empty' "$json_file")"
+  local main_service
+  main_service="$(jq -r '."x-dockauto".project.main_service // empty' "$json_file")"
+  local language
+  language="$(jq -r '."x-dockauto".project.language // empty' "$json_file")"
+  local language_version
+  language_version="$(jq -r '."x-dockauto".project.language_version // empty' "$json_file")"
+
+  export DOCKAUTO_CFG_PROJECT_NAME="${project_name}"
+  export DOCKAUTO_CFG_MAIN_SERVICE="${main_service}"
+  export DOCKAUTO_CFG_LANGUAGE="${language}"
+  export DOCKAUTO_CFG_LANGUAGE_VERSION="${language_version}"
+
+  # === Build.lockfiles ===
+  local lockfiles
+  lockfiles="$(jq -r '."x-dockauto".build.lockfiles // [] | join(" ")' "$json_file")"
+  export DOCKAUTO_CFG_BUILD_LOCKFILES="${lockfiles}"
+
+  # === Tests ===
+  local tests_enabled
+  tests_enabled="$(jq -r '."x-dockauto".tests.enabled // false' "$json_file")"
+  local default_suites
+  default_suites="$(jq -r '."x-dockauto".tests.default_suites // [] | join(",")' "$json_file")"
+  local suites_json
+  suites_json="$(jq -r '."x-dockauto".tests.suites // {}' "$json_file")"
+
+  # === Security ===
+  local scan_enabled sbom_enabled scan_tool sbom_tool scan_fail_on
+  scan_enabled="$(jq -r '."x-dockauto".security.scan.enabled // false' "$json_file")"
+  sbom_enabled="$(jq -r '."x-dockauto".security.sbom.enabled // false' "$json_file")"
+  scan_tool="$(jq -r '."x-dockauto".security.scan.tool // "trivy"' "$json_file")"
+  sbom_tool="$(jq -r '."x-dockauto".security.sbom.tool // "syft"' "$json_file")"
+  scan_fail_on="$(jq -r '."x-dockauto".security.scan.fail_on // [] | join(",")' "$json_file")"
+
+  export DOCKAUTO_CFG_SECURITY_SCAN_ENABLED="${scan_enabled}"
+  export DOCKAUTO_CFG_SECURITY_SBOM_ENABLED="${sbom_enabled}"
+  export DOCKAUTO_CFG_SECURITY_SCAN_TOOL="${scan_tool}"
+  export DOCKAUTO_CFG_SECURITY_SBOM_TOOL="${sbom_tool}"
+  export DOCKAUTO_CFG_SECURITY_SCAN_FAIL_ON="${scan_fail_on}"
+
+  # === Services summary ===
+  local services_list
+  services_list="$(jq -r '.services | keys[]?' "$json_file" || true)"
+  export DOCKAUTO_CFG_SERVICES_LIST="${services_list}"
+
+  local infra_services
+  infra_services="$(jq -r '.services | to_entries[] | select(.value["x-dockauto"].role == "infra") | .key' "$json_file" || true)"
+  export DOCKAUTO_CFG_INFRA_SERVICES="${infra_services}"
+
+  local app_services
+  app_services="$(jq -r '.services | to_entries[] | select(.value["x-dockauto"].role == "app") | .key' "$json_file" || true)"
+  export DOCKAUTO_CFG_APP_SERVICES="${app_services}"
+
+  # Build context cho main_service
+  local main_build_context
+  main_build_context="$(jq -r ".services[\"${main_service}\"].build.context // \"\"" "$json_file" 2>/dev/null || echo "")"
+  export DOCKAUTO_CFG_MAIN_BUILD_CONTEXT="${main_build_context}"
+
+  log_debug "Loaded config: project='${DOCKAUTO_CFG_PROJECT_NAME}', language=${DOCKAUTO_CFG_LANGUAGE}, main_service=${DOCKAUTO_CFG_MAIN_SERVICE}"
+}
+
+dockauto_config_get_language() {
+  echo "${DOCKAUTO_CFG_LANGUAGE:-}"
+}
+
+
+/lib/infra.sh
+#!/usr/bin/env bash
+set -euo pipefail
+
+dockauto_cmd_up_usage() {
+  cat <<'EOF'
+Usage: dockauto up [options]
+
+Options:
+  --keep-infra     Do not tear down infra when command exits (default: false)
+  -p PORTSPEC      Port spec for checks (e.g. "8080:")
+  -n NETWORK       Docker network name to check/use
+
+Examples:
+  dockauto up
+  dockauto up --keep-infra
+  dockauto up -p 8080: -n backend
+EOF
+}
+
+dockauto_cmd_down_usage() {
+  cat <<'EOF'
+Usage: dockauto down
+
+Stops dev infrastructure (containers, networks) created by dockauto up.
+EOF
+}
+
+dockauto_cmd_up() {
+  local keep_infra=0
+  local port_spec=""      # e.g. "8080:"
+  local network_name=""   # e.g. "backend"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --keep-infra)
+        keep_infra=1
+        shift
+        ;;
+      -p)
+        port_spec="${2:-}"
+        shift 2
+        ;;
+      -n)
+        network_name="${2:-}"
+        shift 2
+        ;;
+      -h|--help)
+        dockauto_cmd_up_usage
+        return 0
+        ;;
+      *)
+        log_error "Unknown option for up: $1"
+        dockauto_cmd_up_usage
+        return 1
+        ;;
+    esac
+  done
+
+  log_debug "up: keep_infra=${keep_infra}"
+  log_debug "up: port_spec=${port_spec}"
+  log_debug "up: network_name=${network_name}"
+
+  # up not related to test/scan -> set context default
+  export DOCKAUTO_REQUIRE_INFRA="0"
+  export DOCKAUTO_SKIP_TEST="1"
+  export DOCKAUTO_NO_SCAN="1"
+
+  # ====== Step 1 END ======
+
+  # ====== Step 2 VALIDATE config + environment ======
+  source "${DOCKAUTO_ROOT_DIR}/lib/config.sh"
+  source "${DOCKAUTO_ROOT_DIR}/lib/validate.sh"
+
+  dockauto_config_load "${DOCKAUTO_CONFIG_FILE}" "${DOCKAUTO_PROFILE}"
+  dockauto_validate_environment
+  dockauto_validate_config
+
+  log_info "Starting dev infra (up) (Step 7/9 not implemented yet)."
+  log_info "Config file: ${DOCKAUTO_CONFIG_FILE}, profile: ${DOCKAUTO_PROFILE:-default}"
+
+  if [[ -n "${port_spec}" ]]; then
+    log_info "Will check port availability: ${port_spec} (TODO: implement in Step 7)."
+  fi
+
+  if [[ -n "${network_name}" ]]; then
+    log_info "Will check/create network: ${network_name} (TODO: implement in Step 7)."
+  fi
+
+  if [[ "${keep_infra}" -eq 1 ]]; then
+    log_info "Infra will be kept after up (no auto teardown)."
+  fi
+
+  # TODO:
+  #   - create networks/containers for infra services (role=infra)
+  #   - healthcheck loop
+  #   - handle naming: dockauto_dev_<service>
+}
+
+dockauto_cmd_down() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help)
+        dockauto_cmd_down_usage
+        return 0
+        ;;
+      *)
+        log_error "Unknown option for down: $1"
+        dockauto_cmd_down_usage
+        return 1
+        ;;
+    esac
+  done
+
+  log_info "Stopping dev infra (Step 9 logic to be implemented)."
+  # TODO: tìm containers/network theo naming convention (dockauto_dev_...) và stop/remove
+}
+
+
+/lib/init.sh
+#!/usr/bin/env bash
+set -euo pipefail
+
+dockauto_cmd_init_usage() {
+  cat <<'EOF'
+Usage: dockauto init [--lang <node|python|java|...>] [--from-compose <file>] [--force]
+
+Options:
+  --lang LANG           Generate dockauto.yml from built-in template for language
+  --from-compose FILE   Generate dockauto.yml from existing docker-compose.yml
+  --force               Overwrite existing dockauto.yml if it exists
+
+Examples:
+  dockauto init --lang node
+  dockauto init --lang python
+  dockauto init --lang java
+  dockauto init --from-compose docker-compose.yml
+EOF
+}
+
+docker_cmd_init() {
+  local lang=""
+  local from_compose=""
+  local force=0
+
+  # Parse args for init
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --lang)
+        lang="${2:-}"
+        shift 2
+        ;;
+      --from-compose)
+        from_compose="${2:-}"
+        shift 2
+        ;;
+      --force)
+        force=1
+        shift
+        ;;
+      -h|--help)
+        docker_cmd_init_usage
+        return 0
+        ;;
+      *)
+        log_error "Unknown option for init: $1"
+        docker_cmd_init_usage
+        return 1
+        ;;
+    esac
+  done
+
+  # Check conflict
+  if [[ -n "$lang" && -n "$from_compose" ]]; then
+      log_error "Please use either --lang or --from-compose, not both."
+      return 1
+  fi
+
+  if [[ -z "$lang" && -n "$from_compose" ]]; then
+    dockauto_init_from_compose "$from_compose" "$force"
+  elif [[ -n "$lang" && -z "$from_compose" ]]; then
+    dockauto_init_from_lang "$lang" "$force"
+  else
+    log_error "You must specify either --lang or --from-compose."
+    docker_cmd_init_usage
+    return 1
+  fi
+}
+
+dockauto_init_from_lang() {
+  local lang="$1"
+  local force="$2"
+  local target_file="dockauto.yml"
+
+  local template_file="${DOCKAUTO_ROOT_DIR}/templates/dockauto.${lang}.yml"
+
+  if [[ ! -f "$template_file" ]]; then
+    log_error "No template found for language '${lang}' at ${template_file}"
+    return 1
+  fi
+
+  if [[ -f "$target_file" && "$force" -ne 1 ]]; then
+    log_error "${target_file} already exists. Use --force to overwrite."
+    return 1
+  fi
+
+  cp "$template_file" "$target_file"
+  log_success "Generate ${target_file} from template '${lang}'."
+  log_info "You can now edit ${target_file} to match your project."
+}
+
+dockauto_init_from_compose() {
+  local compose_file="$1"
+  local force="$2"
+  local target_file="dockauto.yml"
+
+  if [[ ! -f "$compose_file" ]]; then
+    log_error "Compose file not found: ${compose_file}"
+    return 1
+  fi
+
+  if [[ -f "$target_file" && "$force" -ne 1 ]]; then
+    log_error "${target_file} already exists. Use --force to overwrite."
+    return 1
+  fi
+
+  log_info "Generating ${target_file} from ${compose_file} ..."
+
+  # Copy compose to dockauto.yml
+  cp "$compose_file" "${target_file}"
+
+  # Append x-dockauto skeleton (User custom)
+  cat >>"$target_file" <<'EOF'
+
+# ==== x-dockauto metadata (added by dockauto init --from-compose) ====
+x-dockauto:
+  project:
+    name: my_app
+    main_service: app
+    language: node
+    language_version: "22"
+
+  build:
+    lockfiles:
+      - package-lock.json
+    # dockerfile_template: node
+
+  tests:
+    enabled: true
+    default_suites: ["unit"]
+    suites:
+      unit:
+        cmd: "npm test"
+        requires_infra: []
+      integration:
+        cmd: "npm run test:integration"
+        requires_infra: ["db", "redis"]
+
+  security:
+    scan:
+      enabled: true
+      tool: trivy
+      fail_on: ["CRITICAL","HIGH"]
+      output: "reports/security"
+    sbom:
+      enabled: true
+      tool: syft
+      format: "spdx-json"
+      output: "reports/sbom"
+
+  profiles:
+    dev:
+      description: "Local development"
+    ci:
+      description: "CI pipeline build + full tests"
+
+# NOTE:
+# - Please review x-dockauto.project.language / tests / infra mapping.
+# - Ensure 'main_service' matches your app service (e.g., 'app', 'web', etc.).
+EOF
+
+  log_success "Generated ${target_file} from ${compose_file}."
+  log_info "Please review the added x-dockauto block at the end of ${target_file}."
+}
+
+/lib/scan.sh
+#!/usr/bin/env bash
+set -euo pipefail
+
+dockauto_scan_image() {
+  local image_tag="$1"
+
+  if [[ "${DOCKAUTO_SCAN_AVAILABLE:-1}" -ne 1 ]]; then
+    log_warn "Scan tools not available or --no-scan enabled; skipping scan for image ${image_tag}."
+    return 0
+  fi
+
+  log_info "Scanning image ${image_tag} (Step 6 to be implemented)."
+  log_info "Scan tool: ${DOCKAUTO_CFG_SECURITY_SCAN_TOOL}, SBOM tool: ${DOCKAUTO_CFG_SECURITY_SBOM_TOOL}"
+  # TODO:
+  #   - trivy image ...
+  #   - syft packages ...
+  #   - apply fail_on policy
+}
+
+/lib/test.sh
+#!/usr/bin/env bash
+set -euo pipefail
+
+dockauto_cmd_test_usage() {
+  cat <<'EOF'
+Usage: dockauto test [options]
+
+Options:
+  --infra                  Require infra (db/broker) for tests
+  --ignore-test-failure    Do not fail if tests fail (just warn)
+  --test SUITES            Comma-separated test suites (e.g. "unit,integration")
+
+Examples:
+  dockauto test
+  dockauto test --test integration
+  dockauto test --infra --test unit,integration
+EOF
+}
+
+dockauto_cmd_test() {
+  local require_infra=0
+  local ignore_test_failure=0
+  local test_suites=""   # "unit,integration"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --infra)
+        require_infra=1
+        shift
+        ;;
+      --ignore-test-failure)
+        ignore_test_failure=1
+        shift
+        ;;
+      --test|--tests)
+        test_suites="${2:-}"
+        shift 2
+        ;;
+      -h|--help)
+        dockauto_cmd_test_usage
+        return 0
+        ;;
+      *)
+        log_error "Unknown option for test: $1"
+        dockauto_cmd_test_usage
+        return 1
+        ;;
+    esac
+  done
+
+  # Export context
+  export DOCKAUTO_REQUIRE_INFRA="${require_infra}"
+  export DOCKAUTO_IGNORE_TEST_FAILURE="${ignore_test_failure}"
+  export DOCKAUTO_TEST_SUITES="${test_suites}"
+  export DOCKAUTO_SKIP_TEST="0"
+  export DOCKAUTO_NO_SCAN="1"   # test but not scan
+
+  log_debug "test: require_infra=${require_infra}"
+  log_debug "test: ignore_test_failure=${ignore_test_failure}"
+  log_debug "test: test_suites=${test_suites}"
+
+  # ====== Step 1 END ======
+
+  # ====== Step 2 VALIDATE config + environment ======
+  source "${DOCKAUTO_ROOT_DIR}/lib/config.sh"
+  source "${DOCKAUTO_ROOT_DIR}/lib/validate.sh"
+
+  dockauto_config_load "${DOCKAUTO_CONFIG_FILE}" "${DOCKAUTO_PROFILE}"
+  dockauto_validate_environment
+  dockauto_validate_config
+
+  log_info "Starting test pipeline (Step 7/8 in future)."
+  log_info "Starting test pipeline (Step 2+ not implemented yet)."
+  log_info "Config file: ${DOCKAUTO_CONFIG_FILE}, profile: ${DOCKAUTO_PROFILE:-default}"
+
+  if [[ "${require_infra}" -eq 1 ]]; then
+    log_info "Infra (db/broker) will be required for tests."
+  fi
+
+  if [[ "${ignore_test_failure}" -eq 1 ]]; then
+    log_info "Test failures will not fail the command (ignore-test-failure)."
+  fi
+
+  # TODO:
+  #   - infra_up_for_tests
+  #   - run_tests
+  #   - optional cleanup
+}
+
+
+/lib/utils.sh
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Basic color
+_red='\033[0;31m'
+_yellow='\033[0;33m'
+_blue='\033[0;34m'
+_green='\033[0;32m'
+_reset='\033[0m'
+
+# Set DOCKAUTO_VERBOSE, DOCKAUTO_QUIET in cli
+log_debug() {
+  if [[ "${DOCKAUTO_VERBOSE:-0}" -eq 1 ]]; then
+    printf "${_blue}[DEBUG]${_reset} %s\n" "$*" >&2
+  fi
+}
+
+log_info() {
+  if [[ "${DOCKAUTO_QUIET:-0}" -eq 1 ]]; then
+    return 0
+  fi
+  printf "${_blue}[INFO]${_reset} %s\n" "$*" >&2
+}
+
+log_warn() {
+  printf "${_yellow}[WARN]${_reset} %s\n" "$*" >&2
+}
+
+log_error() {
+  printf "${_red}[ERROR]${_reset} %s\n" "$*" >&2
+}
+
+log_success() {
+  printf "${_green}[OK]${_reset} %s\n" "$*" >&2
+}
+
+
+/lib/validate.sh
+#!/usr/bin/env bash
+set -euo pipefail
+
+dockauto_validate_environment() {
+  log_debug "Validating environment (docker, yq, jq, trivy, syft, language tool...)"
+
+  local missing=0
+  for cmd in docker yq jq; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      log_error "Required command '$cmd' not found in PATH. Please install it first."
+      missing=1
+    fi
+  done
+
+  if [[ "$missing" -ne 0 ]]; then
+    log_error "Please install the missing tools above and retry."
+    exit 1
+  fi
+
+  # Language-specific tools (best-effort warning)
+  case "${DOCKAUTO_CFG_LANGUAGE:-}" in
+    node)
+      if ! command -v node >/dev/null 2>&1; then
+        log_warn "Node.js (node) is not installed. Local commands like 'npm test' may fail. Install from https://nodejs.org/."
+      fi
+      ;;
+    python)
+      if ! command -v python >/dev/null 2>&1 && ! command -v python3 >/dev/null 2>&1; then
+        log_warn "Python is not installed. Local 'pytest' may fail. Install Python 3.x first."
+      fi
+      ;;
+    java)
+      if ! command -v java >/dev/null 2>&1; then
+        log_warn "Java runtime (java) not found. Tests/build commands may fail. Install a JDK (OpenJDK/Temurin...)."
+      fi
+      ;;
+  esac
+
+  # Security tooling
+  export DOCKAUTO_SCAN_AVAILABLE=1
+  if [[ "${DOCKAUTO_NO_SCAN:-0}" -eq 1 ]]; then
+    log_info "Security scan disabled via --no-scan."
+    DOCKAUTO_SCAN_AVAILABLE=0
+  else
+    local need_scan=0
+    if [[ "${DOCKAUTO_CFG_SECURITY_SCAN_ENABLED:-false}" == "true" ]]; then
+      need_scan=1
+    fi
+    if [[ "${DOCKAUTO_CFG_SECURITY_SBOM_ENABLED:-false}" == "true" ]]; then
+      need_scan=1
+    fi
+    if [[ "$need_scan" -eq 1 ]]; then
+      if ! command -v trivy >/dev/null 2>&1; then
+        log_warn "Trivy not found. Security scan may be skipped. Install: https://aquasecurity.github.io/trivy/"
+        DOCKAUTO_SCAN_AVAILABLE=0
+      fi
+      if ! command -v syft >/dev/null 2>&1; then
+        log_warn "Syft not found. SBOM generation may be skipped. Install: https://github.com/anchore/syft"
+        DOCKAUTO_SCAN_AVAILABLE=0
+      fi
+    fi
+  fi
+}
+
+dockauto_validate_config() {
+  local json="${DOCKAUTO_CONFIG_JSON:-}"
+  if [[ -z "$json" || ! -f "$json" ]]; then
+    log_error "Internal error: DOCKAUTO_CONFIG_JSON not set or file missing."
+    exit 1
+  fi
+
+  # Is x-dockauto present?
+  local has_meta
+  has_meta="$(jq 'has("x-dockauto")' "$json")"
+  if [[ "$has_meta" != "true" ]]; then
+    log_error "Missing top-level 'x-dockauto' block in ${DOCKAUTO_CONFIG_FILE}."
+    exit 1
+  fi
+
+  # Project basic
+  if [[ -z "${DOCKAUTO_CFG_PROJECT_NAME:-}" ]]; then
+    log_error "x-dockauto.project.name is required."
+    exit 1
+  fi
+
+  if [[ -z "${DOCKAUTO_CFG_LANGUAGE:-}" ]]; then
+    log_error "x-dockauto.project.language is required."
+    exit 1
+  fi
+
+  local supported_langs="node python java"
+  local lang_ok=0
+  for l in $supported_langs; do
+    if [[ "$l" == "${DOCKAUTO_CFG_LANGUAGE}" ]]; then
+      lang_ok=1
+      break
+    fi
+  done
+  if [[ "$lang_ok" -ne 1 ]]; then
+    log_error "Unsupported language '${DOCKAUTO_CFG_LANGUAGE}'. Supported: ${supported_langs}."
+    exit 1
+  fi
+
+  if [[ -z "${DOCKAUTO_CFG_LANGUAGE_VERSION:-}" ]]; then
+    log_warn "x-dockauto.project.language_version is not set; consider pinning language version."
+  fi
+
+  if [[ -z "${DOCKAUTO_CFG_MAIN_SERVICE:-}" ]]; then
+    log_error "x-dockauto.project.main_service is required."
+    exit 1
+  fi
+
+  # main_service exists in services?
+  local has_main_service
+  has_main_service="$(jq -r --arg svc "${DOCKAUTO_CFG_MAIN_SERVICE}" '.services | has($svc)' "$json")"
+  if [[ "$has_main_service" != "true" ]]; then
+    log_error "Main service '${DOCKAUTO_CFG_MAIN_SERVICE}' does not exist in services{}."
+    exit 1
+  fi
+
+  if [[ -z "${DOCKAUTO_CFG_MAIN_BUILD_CONTEXT:-}" ]]; then
+    log_warn "Service '${DOCKAUTO_CFG_MAIN_SERVICE}' has no build.context; Docker will default to '.', check if this is expected."
+  fi
+
+  # profile
+  if [[ -n "${DOCKAUTO_PROFILE:-}" ]]; then
+    local profile_exists
+    profile_exists="$(jq -r --arg p "${DOCKAUTO_PROFILE}" '."x-dockauto".profiles // {} | has($p)' "$json")"
+    if [[ "$profile_exists" != "true" ]]; then
+      log_error "Requested profile '${DOCKAUTO_PROFILE}' does not exist under x-dockauto.profiles."
+      exit 1
+    fi
+  fi
+
+  # basic services
+  if [[ -z "${DOCKAUTO_CFG_SERVICES_LIST:-}" ]]; then
+    log_error "No services defined under services{}."
+    exit 1
+  fi
+
+  # tests
+  if [[ "${DOCKAUTO_CFG_TESTS_ENABLED:-false}" == "true" && "${DOCKAUTO_SKIP_TEST:-0}" -ne 1 ]]; then
+    local effective_suites_raw
+    if [[ -n "${DOCKAUTO_TEST_SUITES:-}" ]] then
+      effective_suites_raw="${DOCKAUTO_TEST_SUITES}"
+    fi
+
+    if [[ -z "$effective_suites_raw" ]]; then
+      log_error "Tests are enabled but no default_suites configured and no --test provided."
+      exit 1
+    fi
+
+    local effective_suites=""
+    IFS=',' read -r -a _arr <<< "$effective_suites_raw"
+    for s in "${_arr[@]}"; do
+      s="$(echo "$s" | xargs)}"  # trim
+      if [[ -n "$s" ]]; then
+        if [[ -n "$effective_suites" ]]; then
+          effective_suites+=" "
+        fi
+        effective_suites+="$s"
+      fi
+    done
+
+    export DOCKAUTO_EFFECTIVE_TEST_SUITES="${effective_suites}"
+
+    local missing_suite=0
+    for suite in $effective_suites; do
+      local exists
+      exists="$(jq -r --arg s "$suite" '."x-dockauto".tests.suites // {} | has($s)' "$json")"
+      if [[ "$exists" != "true" ]]; then
+        log_error "Test suite '${suite}' not found under x-dockauto.tests.suites."
+        missing_suite=1
+        continue
+      fi
+      local cmd
+      cmd="$(jq -r --arg s "$suite" '."x-dockauto".tests.suites[$s].cmd // empty' "$json")"
+      if [[ -z "$cmd" || "$cmd" == "null" ]]; then
+        log_error "Test suite '${suite}' has no 'cmd' configured."
+        missing_suite=1
+      fi
+    done
+    if [[ "$missing_suite" -ne 0 ]]; then
+      exit 1
+    fi
+  fi
+
+  # infra mapping for tests
+  if [[ "${DOCKAUTO_REQUIRE_INFRA:-0}" -eq 1 || "${DOCKAUTO_CFG_TESTS_ENABLED:-false}" == "true" ]]; then
+    local need_infra_names=""
+    if [[ -n "${DOCKAUTO_EFFECTIVE_TEST_SUITES:-}" ]]; then
+      for suite in ${DOCKAUTO_EFFECTIVE_TEST_SUITES}; do
+        local req
+        req="$(jq -r --arg s "$suite" '."x-dockauto".tests.suites[$s].requires_infra // [] | .[]?' "$json" 2>/dev/null || true)"
+        if [[ -n "$req" ]]; then
+          while IFS= read -r r; do
+            # Check duplicate
+            if [[ -z "$r" ]]; then
+              continue
+            fi
+            if [[ " $need_infra_names " != *" $r "* ]]; then
+              need_infra_names+=" $r"
+            fi
+          done <<< "$req"
+        fi
+      done
+    fi
+
+    local bad_infra=0
+    for name in $need_infra_names; do
+      local has_service
+      has_service="$(jq -r --arg svc "$name" '.services | has($svc)' "$json")"
+      if [[ "$has_service" != "true" ]]; then
+        log_error "Test requires infra service '${name}' but no such service defined in services{}."
+        bad_infra=1
+        continue
+      fi
+      local role
+      role="$(jq -r --arg svc "$name" '.services[$svc]["x-dockauto"].role // empty' "$json")"
+      if [[ "$role" != "infra" ]]; then
+        log_error "Service '${name}' is required as infra but x-dockauto.role != 'infra'."
+        bad_infra=1
+      fi
+    done
+    if [[ "$bad_infra" -ne 0 ]]; then
+      exit 1
+    fi
+  fi
+
+  log_success "Config validation OK."
+}
+
+/templates/dockauto.java.yml
+version: "3.9"
+
+# ==== DOCKAUTO META (ROOT) ====
+x-dockauto:
+  project:
+    name: my_java_app
+    main_service: app
+    language: java
+    language_version: "21"
+
+  build:
+    lockfiles:
+      - pom.xml
+    # dockerfile_template: java
+
+  tests:
+    enabled: true
+    default_suites: ["unit"]
+    suites:
+      unit:
+        cmd: "./mvnw test"
+        requires_infra: []
+      integration:
+        cmd: "./mvnw verify -Pintegration"
+        requires_infra: ["db", "redis"]
+
+  security:
+    scan:
+      enabled: true
+      tool: trivy
+      fail_on: ["CRITICAL","HIGH"]
+      output: "reports/security"
+    sbom:
+      enabled: true
+      tool: syft
+      format: "spdx-json"
+      output: "reports/sbom"
+
+  profiles:
+    dev:
+      description: "Local development (Spring profile dev)"
+    ci:
+      description: "CI pipeline build + tests"
+
+# ==== COMMON ANCHORS ====
+x-common-environment: &default-env
+  APP_ENV: development
+  TZ: Asia/Ho_Chi_Minh
+
+x-common-labels: &default-labels
+  maintainer: "your_name"
+  project: "my_java_app"
+
+# ==== SERVICES ====
+services:
+  app:
+    container_name: myjava-app
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SPRING_PROFILES_ACTIVE: dev
+    image: myjava:latest
+    restart: unless-stopped
+    command: ["java", "-jar", "app.jar"]
+    ports:
+      - "8080:8080"
+    environment:
+      <<: *default-env
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: myapp
+      DB_PASSWORD: secret
+      DB_NAME: myapp_db
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/var/log/my_java_app
+    depends_on:
+      - db
+      - redis
+    networks:
+      - backend
+      - frontend
+    labels:
+      <<: *default-labels
+      component: "backend"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    x-dockauto:
+      role: app
+      test_target: true
+      optimize_build: true
+
+  db:
+    image: postgres:16
+    container_name: myjava-db
+    environment:
+      POSTGRES_DB: myapp_db
+      POSTGRES_USER: myapp
+      POSTGRES_PASSWORD: secret
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U myapp -d myapp_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    x-dockauto:
+      role: infra
+      type: postgres
+
+  redis:
+    image: redis:7
+    container_name: myjava-redis
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    x-dockauto:
+      role: infra
+      type: redis
+
+volumes:
+  db_data:
+  redis_data:
+  app_logs:
+  nginx_logs:
+
+networks:
+  backend:
+    driver: bridge
+  frontend:
+    driver: bridge
+
+
+dockauto.node.yml
+# templates/dockauto.node.yml
+
+version: "3.9"
+
+# ==== DOCKAUTO META (ROOT) ====
+x-dockauto:
+  project:
+    name: my_app
+    main_service: app
+    language: node
+    language_version: "22"
+
+  build:
+    lockfiles:
+      - package-lock.json
+    # dockerfile_template: node
+
+  tests:
+    enabled: true
+    default_suites: ["unit"]
+    suites:
+      unit:
+        cmd: "npm test"
+        requires_infra: []
+      integration:
+        cmd: "npm run test:integration"
+        requires_infra: ["db", "redis"]
+
+  security:
+    scan:
+      enabled: true
+      tool: trivy
+      fail_on: ["CRITICAL","HIGH"]
+      output: "reports/security"
+    sbom:
+      enabled: true
+      tool: syft
+      format: "spdx-json"
+      output: "reports/sbom"
+
+  profiles:
+    dev:
+      description: "Local development"
+    ci:
+      description: "CI pipeline build + full tests"
+
+# ==== COMMON ANCHORS ====
+x-common-environment: &default-env
+  APP_ENV: development
+  TZ: Asia/Ho_Chi_Minh
+
+x-common-labels: &default-labels
+  maintainer: "your_name"
+  project: "my_app"
+
+# ==== SERVICES ====
+services:
+  app:
+    container_name: myapp-app
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NODE_ENV: development
+    image: myapp:latest
+    restart: unless-stopped
+    command: ["npm", "run", "start"]
+    ports:
+      - "8080:3000"
+    environment:
+      <<: *default-env
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: myapp
+      DB_PASSWORD: secret
+      DB_NAME: myapp_db
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    env_file:
+      - .env
+    volumes:
+      - ./:/usr/src/app
+      - app_logs:/var/log/myapp
+    depends_on:
+      - db
+      - redis
+    networks:
+      - backend
+      - frontend
+    labels:
+      <<: *default-labels
+      component: "backend"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    x-dockauto:
+      role: app
+      test_target: true
+      optimize_build: true
+
+  db:
+    image: postgres:16
+    container_name: myapp-db
+    environment:
+      POSTGRES_DB: myapp_db
+      POSTGRES_USER: myapp
+      POSTGRES_PASSWORD: secret
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U myapp -d myapp_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    x-dockauto:
+      role: infra
+      type: postgres
+
+  redis:
+    image: redis:7
+    container_name: myapp-redis
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    x-dockauto:
+      role: infra
+      type: redis
+
+volumes:
+  db_data:
+  redis_data:
+  app_logs:
+  nginx_logs:
+
+networks:
+  backend:
+    driver: bridge
+  frontend:
+    driver: bridge
+
+
+dockauto.python.yml
+version: "3.9"
+
+# ==== DOCKAUTO META (ROOT) ====
+x-dockauto:
+  project:
+    name: my_python_app
+    main_service: app
+    language: python
+    language_version: "3.12"
+
+  build:
+    lockfiles:
+      - requirements.txt
+    # dockerfile_template: python
+
+  tests:
+    enabled: true
+    default_suites: ["unit"]
+    suites:
+      unit:
+        cmd: "pytest"
+        requires_infra: []
+      integration:
+        cmd: "pytest tests/integration"
+        requires_infra: ["db", "redis"]
+
+  security:
+    scan:
+      enabled: true
+      tool: trivy
+      fail_on: ["CRITICAL","HIGH"]
+      output: "reports/security"
+    sbom:
+      enabled: true
+      tool: syft
+      format: "spdx-json"
+      output: "reports/sbom"
+
+  profiles:
+    dev:
+      description: "Local development (auto-reload if configured)"
+    ci:
+      description: "CI pipeline build + full tests"
+
+# ==== COMMON ANCHORS ====
+x-common-environment: &default-env
+  APP_ENV: development
+  TZ: Asia/Ho_Chi_Minh
+
+x-common-labels: &default-labels
+  maintainer: "your_name"
+  project: "my_python_app"
+
+# ==== SERVICES ====
+services:
+  app:
+    container_name: mypython-app
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PYTHON_ENV: development
+    image: mypython:latest
+    restart: unless-stopped
+    command: ["python", "app.py"]
+    ports:
+      - "8000:8000"
+    environment:
+      <<: *default-env
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: myapp
+      DB_PASSWORD: secret
+      DB_NAME: myapp_db
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    env_file:
+      - .env
+    volumes:
+      - ./:/usr/src/app
+      - app_logs:/var/log/my_python_app
+    depends_on:
+      - db
+      - redis
+    networks:
+      - backend
+      - frontend
+    labels:
+      <<: *default-labels
+      component: "backend"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    x-dockauto:
+      role: app
+      test_target: true
+      optimize_build: true
+
+  db:
+    image: postgres:16
+    container_name: mypython-db
+    environment:
+      POSTGRES_DB: myapp_db
+      POSTGRES_USER: myapp
+      POSTGRES_PASSWORD: secret
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U myapp -d myapp_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    x-dockauto:
+      role: infra
+      type: postgres
+
+  redis:
+    image: redis:7
+    container_name: mypython-redis
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    x-dockauto:
+      role: infra
+      type: redis
+
+volumes:
+  db_data:
+  redis_data:
+  app_logs:
+  nginx_logs:
+
+networks:
+  backend:
+    driver: bridge
+  frontend:
+    driver: bridge
+
+
+
+
+
+
+

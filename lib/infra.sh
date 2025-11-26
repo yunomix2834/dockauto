@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# dockauto up/down:
+#   Step 1: parse flags
+#   Step 2: VALIDATE config + environment
+#   Step 7/9: infra up / teardown (future)
+
 dockauto_cmd_up_usage() {
   cat <<'EOF'
 Usage: dockauto up [options]
@@ -26,6 +31,7 @@ EOF
 }
 
 dockauto_cmd_up() {
+  # ====== Step 1: Parse flags ======
   local keep_infra=0
   local port_spec=""      # e.g. "8080:"
   local network_name=""   # e.g. "backend"
@@ -65,8 +71,6 @@ dockauto_cmd_up() {
   export DOCKAUTO_SKIP_TEST="1"
   export DOCKAUTO_NO_SCAN="1"
 
-  # ====== Step 1 END ======
-
   # ====== Step 2 VALIDATE config + environment ======
   source "${DOCKAUTO_ROOT_DIR}/lib/config.sh"
   source "${DOCKAUTO_ROOT_DIR}/lib/validate.sh"
@@ -90,13 +94,14 @@ dockauto_cmd_up() {
     log_info "Infra will be kept after up (no auto teardown)."
   fi
 
-  # TODO:
+  # TODO Step 7:
   #   - create networks/containers for infra services (role=infra)
   #   - healthcheck loop
   #   - handle naming: dockauto_dev_<service>
 }
 
 dockauto_cmd_down() {
+  # ====== Step 1: Parse flags ======
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -h|--help)
@@ -111,6 +116,8 @@ dockauto_cmd_down() {
     esac
   done
 
+  # Step 9 (future)
   log_info "Stopping dev infra (Step 9 logic to be implemented)."
-  # TODO: tìm containers/network theo naming convention (dockauto_dev_...) và stop/remove
+  # TODO:
+  #   - stop/remove containers/network with naming pattern dockauto_dev_*
 }

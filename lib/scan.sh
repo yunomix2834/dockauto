@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ====== Step 6: Scan image (Trivy / SBOM) ======
+
 dockauto_scan_image() {
   local image_tag="$1"
 

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ====== Step 0: dockauto wrapper ======
+
 # dockauto version
 VERSION="0.1.0"
 
@@ -13,7 +15,7 @@ export DOCKAUTO_ROOT_DIR="${ROOT_DIR}"
 export DOCKAUTO_VERSION="${VERSION}"
 
 # Source for primary lib
-# At least we need cli & utils for Step 0
+# At least we need cli & utils for Step 1+
 source "${ROOT_DIR}/lib/utils.sh"
 source "${ROOT_DIR}/lib/cli.sh"
 

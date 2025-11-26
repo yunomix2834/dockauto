@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ====== Step 1: CLI + parse arguments & dispatch commands ======
+
 dockauto_usage() {
   cat <<'EOF'
 
@@ -36,9 +38,11 @@ dockauto_main() {
   local verbose=0
   local quiet=0
 
+  local cmd=""
+
+  # ====== Step 1: Parse global flags ======
   # Parse global flags
   # Only before sub-command
-  local cmd=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --config)
@@ -97,13 +101,13 @@ dockauto_main() {
       ;;
 
     init)
-      # STEP 0
+      # Step 0: generate template
       source "${DOCKAUTO_ROOT_DIR}/lib/init.sh"
       dockauto_cmd_init "$@"
       ;;
 
     build)
-      # STEP 1: parse build flags + prepare pipeline
+      # Step 1: parse build flags + pipeline
       source "${DOCKAUTO_ROOT_DIR}/lib/build.sh"
       dockauto_cmd_build "$@"
       ;;

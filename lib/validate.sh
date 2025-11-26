@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ====== Step 2: Validate environment + config ======
+# Check docker, yq, jq, etc,
+# Validate x-dockauto structure, language, tests, infra-mapping
+
 dockauto_validate_environment() {
   log_debug "Validating environment (docker, yq, jq, trivy, syft, language tool...)"
 
@@ -141,8 +145,10 @@ dockauto_validate_config() {
   # tests
   if [[ "${DOCKAUTO_CFG_TESTS_ENABLED:-false}" == "true" && "${DOCKAUTO_SKIP_TEST:-0}" -ne 1 ]]; then
     local effective_suites_raw
-    if [[ -n "${DOCKAUTO_TEST_SUITES:-}" ]] then
+    if [[ -n "${DOCKAUTO_TEST_SUITES:-}" ]]; then
       effective_suites_raw="${DOCKAUTO_TEST_SUITES}"
+    else
+      effective_suites_raw="${DOCKAUTO_CFG_TESTS_DEFAULT_SUITES}"
     fi
 
     if [[ -z "$effective_suites_raw" ]]; then
