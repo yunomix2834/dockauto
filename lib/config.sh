@@ -36,8 +36,8 @@ dockauto_config_load() {
     exit 1
   fi
 
-  export DOCKAUTO_CONFIG_JSON="${json_file}"
-  export DOCKAUTO_CFG_PROFILE_REQUESTED="${profile}"
+  DOCKAUTO_CONFIG_JSON="${json_file}"
+  DOCKAUTO_CFG_PROFILE_REQUESTED="${profile}"
 
   # === Extract x-dockauto.project ===
   local project_name
@@ -49,10 +49,10 @@ dockauto_config_load() {
   local language_version
   language_version="$(jq -r '."x-dockauto".project.language_version // empty' "$json_file")"
 
-  export DOCKAUTO_CFG_PROJECT_NAME="${project_name}"
-  export DOCKAUTO_CFG_MAIN_SERVICE="${main_service}"
-  export DOCKAUTO_CFG_LANGUAGE="${language}"
-  export DOCKAUTO_CFG_LANGUAGE_VERSION="${language_version}"
+  DOCKAUTO_CFG_PROJECT_NAME="${project_name}"
+  DOCKAUTO_CFG_MAIN_SERVICE="${main_service}"
+  DOCKAUTO_CFG_LANGUAGE="${language}"
+  DOCKAUTO_CFG_LANGUAGE_VERSION="${language_version}"
 
   # === Build.lockfiles & dockerfile_template ===
   local lockfiles

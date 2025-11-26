@@ -32,6 +32,18 @@ Examples:
 EOF
 }
 
+# Build pipeline
+dockauto_pipeline_build() {
+  log_debug "STATE: INIT"
+  dockauto_step_build_validate_and_config
+  dockauto_step_build_ensure_dockerfile
+  dockauto_step_build_hash_and_cache
+  dockauto_step_build_image
+  dockauto_step_build_scan
+  dockauto_step_build_tests
+}
+
+
 dockauto_cmd_build() {
   log_debug "STATE: INIT"
 
@@ -46,44 +58,22 @@ dockauto_cmd_build() {
   # Parse build-specific flags
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --infra)
-        require_infra=1
-        shift
-        ;;
-      --skip-test|--skip-tests)
-        skip_test=1
-        shift
-        ;;
-      --ignore-test-failure)
-        ignore_test_failure=1
-        shift
-        ;;
-      --no-scan)
-        no_scan=1
-        shift
-        ;;
-      --test|--tests)
-        test_suites="${2:-}"
-        shift 2
-        ;;
-      -h|--help)
-        dockauto_cmd_build_usage
-        return 0
-        ;;
-      *)
-        log_error "Unknown option for build: $1"
-        dockauto_cmd_build_usage
-        return 1
-        ;;
+      --infra)                                      require_infra=1; shift ;;
+      --skip-test|--skip-tests)                     skip_test=1; shift ;;
+      --ignore-test-failure)                        ignore_test_failure=1; shift ;;
+      --no-scan)                                    no_scan=1; shift ;;
+      --test|--tests)                               test_suites="${2:-}"; shift 2 ;;
+      -h|--help)                                    dockauto_cmd_build_usage; return 0 ;;
+      *) log_error "Unknown option for build: $1";  dockauto_cmd_build_usage; return 1 ;;
     esac
   done
 
   # Export context for Step 2
-  export DOCKAUTO_REQUIRE_INFRA="${require_infra}"
-  export DOCKAUTO_SKIP_TEST="${skip_test}"
-  export DOCKAUTO_IGNORE_TEST_FAILURE="${ignore_test_failure}"
-  export DOCKAUTO_NO_SCAN="${no_scan}"
-  export DOCKAUTO_TEST_SUITES="${test_suites}"
+  DOCKAUTO_REQUIRE_INFRA="$require_infra"
+  DOCKAUTO_SKIP_TEST="$skip_test"
+  DOCKAUTO_IGNORE_TEST_FAILURE="$ignore_test_failure"
+  DOCKAUTO_NO_SCAN="$no_scan"
+  DOCKAUTO_TEST_SUITES="$test_suites"
 
   log_debug "build: require_infra=${require_infra}"
   log_debug "build: skip_test=${skip_test}"
@@ -91,6 +81,10 @@ dockauto_cmd_build() {
   log_debug "build: no_scan=${no_scan}"
   log_debug "build: test_suites=${test_suites}"
 
+  dockauto_pipeline_build
+}
+
+dockauto_step_build_validate_and_config() {
   # ====== Step 2 VALIDATE config + environment ======
   log_debug "STATE: VALIDATE"
 
@@ -100,11 +94,15 @@ dockauto_cmd_build() {
   dockauto_config_load "${DOCKAUTO_CONFIG_FILE}" "${DOCKAUTO_PROFILE}"
   dockauto_validate_environment
   dockauto_validate_config
+}
 
+dockauto_step_build_ensure_dockerfile() {
   # ====== Step 3: Ensure/Generate Dockerfile from Template ======
   source "${DOCKAUTO_ROOT_DIR}/lib/dockerfile.sh"
   dockauto_ensure_dockerfile
+}
 
+dockauto_step_build_hash_and_cache() {
   # ====== Step 4: HASH (CONFIG / SOURCE / BUILD + cache check) ======
   log_debug "STATE: HASH"
   source "${DOCKAUTO_ROOT_DIR}/lib/hash.sh"
@@ -122,11 +120,15 @@ dockauto_cmd_build() {
   else
     log_info "Cache: MISS (no entry for this BUILD_HASH, will build new image in Step 5)."
   fi
+}
 
+dockauto_step_build_image() {
   # ====== Step 5: BUILD image ======
   log_debug "STATE: BUILD"
   dockauto_build_image
+}
 
+dockauto_step_build_scan() {
   # ====== Step 6: SCAN image (optional) ======
   log_debug "STATE: SCAN"
   source "${DOCKAUTO_ROOT_DIR}/lib/scan.sh"
@@ -135,7 +137,9 @@ dockauto_cmd_build() {
   else
     dockauto_scan_image "${DOCKAUTO_IMAGE_TAG}"
   fi
+}
 
+dockauto_step_build_tests() {
   # ====== Step 7 + 8 + 9: TEST + INFRA + CLEANUP ======
   source "${DOCKAUTO_ROOT_DIR}/lib/infra.sh"
   source "${DOCKAUTO_ROOT_DIR}/lib/test.sh"

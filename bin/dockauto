@@ -4,7 +4,7 @@ set -euo pipefail
 # ====== Step 0: dockauto wrapper ======
 
 # dockauto version
-VERSION="0.1.0"
+readonly DOCKAUTO_VERSION="0.1.0"
 
 # Find dockauto's root folder (where lib/, templates/)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,12 +15,14 @@ PROJECT_ROOT="$(pwd)"
 
 # Export for lib to use
 export DOCKAUTO_ROOT_DIR="${ROOT_DIR}"
-export DOCKAUTO_VERSION="${VERSION}"
-export DOCKAUTO_PROJECT_ROOT="${PROJECT_ROOT}"
+export DOCKAUTO_VERSION
+DOCKAUTO_PROJECT_ROOT="${PROJECT_ROOT}"
 
 # Source for primary lib
 # At least we need cli & utils for Step 1+
 source "${ROOT_DIR}/lib/utils.sh"
+source "${ROOT_DIR}/lib/context.sh"
 source "${ROOT_DIR}/lib/cli.sh"
 
+dockauto_ctx_init
 dockauto_main "$@"

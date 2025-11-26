@@ -272,9 +272,17 @@ dockauto_teardown_infra_for_tests() {
 
 # ----- helper: docker compose wrapper -----
 dockauto_docker_compose() {
-  if command -v docker-compose >/dev/null 2>&1; then
-    docker-compose "$@"
-  else
-    docker compose "$@"
+  # Detect once
+  if [[ ${#_dockauto_compose_cmd[@]} -eq 0 ]]; then
+    if docker compose version >/dev/null 2>&1; then
+      _dockauto_compose_cmd=(docker compose)
+    elif command -v docker-compose >/dev/null 2>&1; then
+      _dockauto_compose_cmd=(docker-compose)
+    else
+      log_error "Neither 'docker compose' nor 'docker-compose' is available. Please install Docker Compose plugin."
+      return 1
+    fi
   fi
+
+  "${_dockauto_compose_cmd[@]}" "$@"
 }

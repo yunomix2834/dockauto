@@ -2,6 +2,24 @@
 set -euo pipefail
 
 # ====== Step 1: CLI + parse arguments & dispatch commands ======
+declare -A DOCKAUTO_COMMANDS=(
+  [init]=dockauto_cmd_init
+  [build]=dockauto_cmd_build
+  [test]=dockauto_cmd_test
+  [up]=dockauto_cmd_up
+  [down]=dockauto_cmd_down
+  [setup]=dockauto_cmd_setup
+  [version]=dockauto_cmd_version
+  [help]=dockauto_cmd_help
+)
+
+dockauto_cmd_version() {
+  echo "dockauto ${DOCKAUTO_VERSION:-unknown}"
+}
+
+dockauto_cmd_help() {
+  dockauto_usage
+}
 
 dockauto_usage() {
   cat <<'EOF'
@@ -63,7 +81,11 @@ dockauto_main() {
         quiet=1
         shift
         ;;
-      help|-h|--help|version|-v|--version|init|build|test|up|down|setup)
+      -h|--help)
+        cmd="help"; shift; break ;;
+      -v|--version)
+        cmd="version"; shift; break ;;
+      init|build|test|up|down|setup)
         cmd="$1"
         shift
         break
@@ -82,63 +104,78 @@ dockauto_main() {
   fi
 
   # Export global context for lib usage
-  export DOCKAUTO_CONFIG_FILE="${global_config}"
-  export DOCKAUTO_PROFILE="${global_profile}"
-  export DOCKAUTO_VERBOSE="${verbose}"
-  export DOCKAUTO_QUIET="${quiet}"
+  dockauto_ctx_set_globals "${global_config}" "${global_profile}" "${verbose}" "${quiet}"
 
   log_debug "Global config file: ${DOCKAUTO_CONFIG_FILE}"
   log_debug "Global profile: ${DOCKAUTO_PROFILE}"
   log_debug "Verbose: ${DOCKAUTO_VERBOSE}, Quiet: ${DOCKAUTO_QUIET}"
   log_debug "Project root: ${DOCKAUTO_PROJECT_ROOT:-$(pwd)}"
 
+#  case "$cmd" in
+#    version|-v|--version)
+#      echo "dockauto ${DOCKAUTO_VERSION:-unknown}"
+#      exit 0
+#      ;;
+#
+#    help|-h|--help)
+#      dockauto_usage
+#      exit 0
+#      ;;
+#
+#    init)
+#      # Step 0: generate template
+#      source "${DOCKAUTO_ROOT_DIR}/lib/init.sh"
+#      dockauto_cmd_init "$@"
+#      ;;
+#
+#    build)
+#      # Step 1: parse build flags + pipeline
+#      source "${DOCKAUTO_ROOT_DIR}/lib/build.sh"
+#      dockauto_cmd_build "$@"
+#      ;;
+#
+#    test)
+#      source "${DOCKAUTO_ROOT_DIR}/lib/test.sh"
+#      dockauto_cmd_test "$@"
+#      ;;
+#
+#    up)
+#      source "${DOCKAUTO_ROOT_DIR}/lib/infra.sh"
+#      dockauto_cmd_up "$@"
+#      ;;
+#
+#    down)
+#      source "${DOCKAUTO_ROOT_DIR}/lib/infra.sh"
+#      dockauto_cmd_down "$@"
+#      ;;
+#
+#    setup)
+#      source "${DOCKAUTO_ROOT_DIR}/lib/setup.sh"
+#      dockauto_cmd_setup "$@"
+#      ;;
+#
+#    *)
+#      log_error "Unknown command: ${cmd}"
+#      dockauto_usage
+#      exit 1
+#      ;;
+#  esac
+
+  # Lazy-load command libs
   case "$cmd" in
-    version|-v|--version)
-      echo "dockauto ${DOCKAUTO_VERSION:-unknown}"
-      exit 0
-      ;;
-
-    help|-h|--help)
-      dockauto_usage
-      exit 0
-      ;;
-
-    init)
-      # Step 0: generate template
-      source "${DOCKAUTO_ROOT_DIR}/lib/init.sh"
-      dockauto_cmd_init "$@"
-      ;;
-
-    build)
-      # Step 1: parse build flags + pipeline
-      source "${DOCKAUTO_ROOT_DIR}/lib/build.sh"
-      dockauto_cmd_build "$@"
-      ;;
-
-    test)
-      source "${DOCKAUTO_ROOT_DIR}/lib/test.sh"
-      dockauto_cmd_test "$@"
-      ;;
-
-    up)
-      source "${DOCKAUTO_ROOT_DIR}/lib/infra.sh"
-      dockauto_cmd_up "$@"
-      ;;
-
-    down)
-      source "${DOCKAUTO_ROOT_DIR}/lib/infra.sh"
-      dockauto_cmd_down "$@"
-      ;;
-
-    setup)
-      source "${DOCKAUTO_ROOT_DIR}/lib/setup.sh"
-      dockauto_cmd_setup "$@"
-      ;;
-
-    *)
-      log_error "Unknown command: ${cmd}"
-      dockauto_usage
-      exit 1
-      ;;
+    init)   source "${DOCKAUTO_ROOT_DIR}/lib/init.sh" ;;
+    build)  source "${DOCKAUTO_ROOT_DIR}/lib/build.sh" ;;
+    test)   source "${DOCKAUTO_ROOT_DIR}/lib/test.sh" ;;
+    up|down) source "${DOCKAUTO_ROOT_DIR}/lib/infra.sh" ;;
+    setup)  source "${DOCKAUTO_ROOT_DIR}/lib/setup.sh" ;;
   esac
+
+  local handler="${DOCKAUTO_COMMANDS[$cmd]:-}"
+  if [[ -z "$handler" ]]; then
+    log_error "Unknown command: ${cmd}"
+    dockauto_usage
+    exit 1
+  fi
+
+  "$handler" "$@"
 }

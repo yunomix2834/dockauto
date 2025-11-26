@@ -72,6 +72,10 @@ dockauto_hash_calculate() {
       --exclude='./tmp'
       --exclude='./log'
       --exclude='./logs'
+      --exclude='./.venv'
+      --exclude='./dist'
+      --exclude='./build'
+      --exclude='./target'
     )
 
     if [[ -f ".dockautoignore" ]]; then

@@ -115,7 +115,7 @@ services:
       retries: 3
       start_period: 20s
 
-    # Metadata cho dockauto.sh riêng cho service app
+    # Metadata cho dockauto riêng cho service app
     x-dockauto:
       role: app              # đánh dấu đây là service chính
       test_target: true      # service này dùng để chạy test (docker run ...)
