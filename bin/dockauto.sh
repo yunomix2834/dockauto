@@ -6,13 +6,17 @@ set -euo pipefail
 # dockauto version
 VERSION="0.1.0"
 
-# Find project's root folder
+# Find dockauto's root folder (where lib/, templates/ nằm)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# Project root: where user's location
+PROJECT_ROOT="$(pwd)"
 
 # Export for lib to use
 export DOCKAUTO_ROOT_DIR="${ROOT_DIR}"
 export DOCKAUTO_VERSION="${VERSION}"
+export DOCKAUTO_PROJECT_ROOT="${PROJECT_ROOT}"
 
 # Source for primary lib
 # At least we need cli & utils for Step 1+

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ====== Common utils: logging, colors ======
+
 # Basic color
 _red='\033[0;31m'
 _yellow='\033[0;33m'

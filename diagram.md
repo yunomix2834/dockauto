@@ -237,24 +237,7 @@ networks:
     + check infra if rqr-infra is true
     + use jq to parse yml to json report
 
-- Step 3: Calculate build hash
-  - Goals: Decide build or reuse cache
-  - Create fingerprint
-    + Merge dockauto.yml
-    + Version template
-    + ...
-    + CONFIG_HASH = dockerauto.yml + template version
-    + SOURCE_HASH = sourcecode + lockfiles
-    + BUILD_HASH = sha256 (CONFIG_HASH + SOURCE_HASH)
-  - Calculate hash -> print
-  - Check cache (if exist)
-  - Ignore unnecessary file
-    + .dockautoignore: node_modules, tmp, log, .git
-  - Concurrent safety: 
-    + When many processes concurrently build, avoid break .dockauto/cache.json -> Use file lock (flock) or atomic write
-      + Write in temp file -> mv
-
-- Step 4: Generate Dockerfile from Template
+- Step 3: Generate Dockerfile from Template
   - If Dockerfile was designated  -> do not generate, use that file to build
   - From language
   - Prepare environment
@@ -262,10 +245,28 @@ networks:
     + # dockauto-template-version: 1
     + Write this version in fingerprint -> when up template, hash is diff -> rebuild
 
-- Step 4.5: Automate optimize dockerfile to prepare build in step 3
+- Step 3.5: Automate optimize dockerfile to prepare build in step 3
   (Cái này khả năng chưa làm luôn vì sẽ thêm các option ở cli ứng với build theo image gì để phù hợp với ngữ cảnh build)
   + --optimize-cache (multi-stage, layer cache)
   + --optimize-install (install deps before copy source)
+
+- Step 4: Calculate build hash
+    - Goals: Decide build or reuse cache
+    - Create fingerprint
+        + Merge dockauto.yml
+        + Version template
+        + ...
+        + CONFIG_HASH = dockerauto.yml + template version
+        + SOURCE_HASH = sourcecode + lockfiles
+        + BUILD_HASH = sha256 (CONFIG_HASH + SOURCE_HASH)
+    - Calculate hash -> print
+    - Check cache (if exist)
+    - Ignore unnecessary file
+        + .dockautoignore: node_modules, tmp, log, .git
+    - Concurrent safety:
+        + When many processes concurrently build, avoid break .dockauto/cache.json -> Use file lock (flock) or atomic write
+            + Write in temp file -> mv
+
 
 - Step 5: Build image (Docker)
   - Export log + report: hash → tag → id → digest → created_at -> Format log to human readable

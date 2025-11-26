@@ -5,8 +5,9 @@ set -euo pipefail
 #   FUTURE CALL state machine: VALIDATE -> HASH -> BUILD -> SCAN -> INFRA -> TEST -> CLEANUP
 #   Step 1: CLI & build flags
 #   Step 2: VALIDATE (config + environment)
+#   Step 4: Generate Dockerfile from template (if needed)
 #   Step 3: HASH (CONFIG/SOURCE/BUILD + cache check)
-#   Step 4+: BUILD, SCAN, INFRA, TEST, CLEANUP (future)
+#   Step 5+: BUILD, SCAN, INFRA, TEST, CLEANUP (future)
 
 dockauto_cmd_build_usage() {
   cat <<'EOF'

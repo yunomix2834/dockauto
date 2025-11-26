@@ -54,10 +54,14 @@ dockauto_config_load() {
   export DOCKAUTO_CFG_LANGUAGE="${language}"
   export DOCKAUTO_CFG_LANGUAGE_VERSION="${language_version}"
 
-  # === Build.lockfiles ===
+  # === Build.lockfiles & dockerfile_template ===
   local lockfiles
   lockfiles="$(jq -r '."x-dockauto".build.lockfiles // [] | join(" ")' "$json_file")"
   export DOCKAUTO_CFG_BUILD_LOCKFILES="${lockfiles}"
+
+  local dockerfile_template
+  dockerfile_template="$(jq -r '."x-dockauto".build.dockerfile_template // empty' "$json_file")"
+  export DOCKAUTO_CFG_DOCKERFILE_TEMPLATE="${dockerfile_template}"
 
   # === Tests ===
   local tests_enabled

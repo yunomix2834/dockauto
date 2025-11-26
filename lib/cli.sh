@@ -74,7 +74,7 @@ dockauto_main() {
     esac
   done
 
-  # Set default cmd if not exist
+  # Set default cmd if not exist -> show help
   if [[ -z "${cmd}" ]]; then
     cmd="help"
   fi
@@ -88,6 +88,7 @@ dockauto_main() {
   log_debug "Global config file: ${DOCKAUTO_CONFIG_FILE}"
   log_debug "Global profile: ${DOCKAUTO_PROFILE}"
   log_debug "Verbose: ${DOCKAUTO_VERBOSE}, Quiet: ${DOCKAUTO_QUIET}"
+  log_debug "Project root: ${DOCKAUTO_PROJECT_ROOT:-$(pwd)}"
 
   case "$cmd" in
     version|-v|--version)

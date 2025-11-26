@@ -22,7 +22,7 @@ dockauto_hash_calculate() {
 
   mkdir -p "${project_root}/.dockauto"
 
-  # Detect template version
+  # Detect template version from Dockerfile
   local ctx="${DOCKAUTO_CFG_MAIN_BUILD_CONTEXT:-.}"
   [[ -z "$ctx" ]] && ctx="."
   local dockerfile_rel="${DOCKAUTO_CFG_MAIN_DOCKERFILE:-Dockerfile}"
@@ -57,7 +57,6 @@ dockauto_hash_calculate() {
   # tar all project except
   # .git, .dockauto, node_modules, tmp, log(s)
   # + user .dockautoignore
-  local ignore_file="${project_root}/.dockautoignore"
   local source_hash
 
   (
