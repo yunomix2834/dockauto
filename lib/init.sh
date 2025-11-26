@@ -20,7 +20,7 @@ Examples:
 EOF
 }
 
-docker_cmd_init() {
+dockauto_cmd_init() {
   local lang=""
   local from_compose=""
   local force=0
@@ -41,12 +41,12 @@ docker_cmd_init() {
         shift
         ;;
       -h|--help)
-        docker_cmd_init_usage
+        dockauto_cmd_init_usage
         return 0
         ;;
       *)
         log_error "Unknown option for init: $1"
-        docker_cmd_init_usage
+        dockauto_cmd_init_usage
         return 1
         ;;
     esac
@@ -64,7 +64,7 @@ docker_cmd_init() {
     dockauto_init_from_lang "$lang" "$force"
   else
     log_error "You must specify either --lang or --from-compose."
-    docker_cmd_init_usage
+    dockauto_cmd_init_usage
     return 1
   fi
 }

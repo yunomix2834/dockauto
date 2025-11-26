@@ -63,7 +63,7 @@ dockauto_main() {
         quiet=1
         shift
         ;;
-      help|-h|--help|version|-v|--version|init|build|test|up|down)
+      help|-h|--help|version|-v|--version|init|build|test|up|down|setup)
         cmd="$1"
         shift
         break

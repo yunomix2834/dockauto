@@ -156,7 +156,7 @@ dockauto_infra_required_for_tests() {
   echo "$names"
 }
 
-dockauto_step7_provision_infra_for_tests() {
+dockauto_provision_infra_for_tests() {
   if [[ "${DOCKAUTO_CFG_TESTS_ENABLED:-false}" != "true" && "${DOCKAUTO_REQUIRE_INFRA:-0}" -ne 1 ]]; then
     log_debug "Tests are disabled and --infra not set; skipping infra provision."
     return 0

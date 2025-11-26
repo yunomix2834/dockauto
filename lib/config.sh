@@ -30,7 +30,7 @@ dockauto_config_load() {
 
   local json_file=".dockauto/config.json"
 
-  log.debug "Converting YAML to JSON with yq + jq..."
+  log_debug "Converting YAML to JSON with yq + jq..."
   if ! yq eval -o=json '.' "$config_file" | jq '.' > "$json_file"; then
     log_error "Failed to parse ${config_file} via yq/jq."
     exit 1

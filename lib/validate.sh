@@ -159,7 +159,7 @@ dockauto_validate_config() {
     local effective_suites=""
     IFS=',' read -r -a _arr <<< "$effective_suites_raw"
     for s in "${_arr[@]}"; do
-      s="$(echo "$s" | xargs)}"  # trim
+      s="$(echo "$s" | xargs)"  # trim
       if [[ -n "$s" ]]; then
         if [[ -n "$effective_suites" ]]; then
           effective_suites+=" "

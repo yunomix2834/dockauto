@@ -78,7 +78,7 @@ dockauto_hash_calculate() {
       tar_args+=(--exclude-from='.dockautoignore')
     fi
 
-    "${tar_args[0]}" 2>/dev/null
+    "${tar_args[@]}" 2>/dev/null
   ) | sha256sum | awk '{print $1}' | {
     read -r source_hash
     printf '%s' "$source_hash"
