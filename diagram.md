@@ -119,7 +119,7 @@ services:
     x-dockauto:
       role: app              # đánh dấu đây là service chính
       test_target: true      # service này dùng để chạy test (docker run ...)
-      optimize_build: true   # sau này dùng cho step 4.5
+      optimize_build: true   # sau này dùng cho step 3.5
 
   db:
     image: postgres:16
@@ -250,7 +250,7 @@ networks:
   + --optimize-cache (multi-stage, layer cache)
   + --optimize-install (install deps before copy source)
 
-- Step 4: Calculate build hash
+- Step 3: Calculate build hash
     - Goals: Decide build or reuse cache
     - Create fingerprint
         + Merge dockauto.yml

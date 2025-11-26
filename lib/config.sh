@@ -76,18 +76,24 @@ dockauto_config_load() {
   export DOCKAUTO_CFG_TESTS_SUITES_JSON="${suites_json}"
 
   # === Security ===
-  local scan_enabled sbom_enabled scan_tool sbom_tool scan_fail_on
+  local scan_enabled sbom_enabled scan_tool sbom_tool scan_fail_on scan_output sbom_output sbom_format
   scan_enabled="$(jq -r '."x-dockauto".security.scan.enabled // false' "$json_file")"
   sbom_enabled="$(jq -r '."x-dockauto".security.sbom.enabled // false' "$json_file")"
   scan_tool="$(jq -r '."x-dockauto".security.scan.tool // "trivy"' "$json_file")"
   sbom_tool="$(jq -r '."x-dockauto".security.sbom.tool // "syft"' "$json_file")"
   scan_fail_on="$(jq -r '."x-dockauto".security.scan.fail_on // [] | join(",")' "$json_file")"
+  scan_output="$(jq -r '."x-dockauto".security.scan.output // "reports/security"' "$json_file")"
+  sbom_output="$(jq -r '."x-dockauto".security.sbom.output // "reports/sbom"' "$json_file")"
+  sbom_format="$(jq -r '."x-dockauto".security.sbom.format // "spdx-json"' "$json_file")"
 
   export DOCKAUTO_CFG_SECURITY_SCAN_ENABLED="${scan_enabled}"
   export DOCKAUTO_CFG_SECURITY_SBOM_ENABLED="${sbom_enabled}"
   export DOCKAUTO_CFG_SECURITY_SCAN_TOOL="${scan_tool}"
   export DOCKAUTO_CFG_SECURITY_SBOM_TOOL="${sbom_tool}"
   export DOCKAUTO_CFG_SECURITY_SCAN_FAIL_ON="${scan_fail_on}"
+  export DOCKAUTO_CFG_SECURITY_SCAN_OUTPUT="${scan_output}"
+  export DOCKAUTO_CFG_SECURITY_SBOM_OUTPUT="${sbom_output}"
+  export DOCKAUTO_CFG_SECURITY_SBOM_FORMAT="${sbom_format}"
 
   # === Services summary ===
   local services_list

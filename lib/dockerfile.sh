@@ -1,14 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ====== Step 4: Generate Dockerfile from Template ======
+# ====== Step 3: Generate Dockerfile from Template ======
 # - Nếu x-dockauto.build.dockerfile_template có giá trị -> luôn dùng template đó
 # - Nếu không:
 #     + Nếu Dockerfile tồn tại -> giữ nguyên
 #     + Nếu không có -> generate template theo language
 # - Template có comment version:
 #     # dockauto-template-version: <N>
-#   Version này sẽ được Step 3 dùng để tính CONFIG_HASH
+#   Version này sẽ được Step 4 dùng để tính CONFIG_HASH
+
+dockauto_template_version_for_lang() {
+  local lang="$1"
+  case "$lang" in
+    node)   echo "1" ;;
+    python) echo "1" ;;
+    java)   echo "1" ;;
+    *)      echo "0" ;;
+  esac
+}
 
 dockauto_render_dockerfile_template() {
   local lang="$1"

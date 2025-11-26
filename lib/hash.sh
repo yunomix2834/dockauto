@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ====== Step 3: Hash ======
+# ====== Step 4: Hash ======
 # - CONFIG_HASH = dockauto.yml + template_version (+ dockauto version)
 # - SOURCE_HASH = hash(source code + lockfiles) with ignore
 # - BUILD_HASH  = sha256(CONFIG_HASH + SOURCE_HASH)
@@ -41,7 +41,7 @@ dockauto_hash_calculate() {
   fi
   export DOCKAUTO_TEMPLATE_VERSION="${template_version}"
 
-  # Config hash
+  # CONFIG_HASH
   local config_hash
   config_hash="$(
     {
@@ -119,5 +119,49 @@ dockauto_hash_check_cache() {
     export DOCKAUTO_CACHE_HIT=1
     export DOCKAUTO_CACHE_ENTRY_JSON="${entry}"
     return 0
+  fi
+}
+
+# ====== Helper: atomic cache update (Step 5) ======
+
+dockauto_cache_update_build_entry() {
+  local project_root="${DOCKAUTO_PROJECT_ROOT:-$(pwd)}"
+  local cache_file="${project_root}/.dockauto/cache.json"
+  local tmp_file="${cache_file}.tmp"
+  local lock_file="${cache_file}.lock"
+  # JSON object (not array)
+  local build_entry_json="$1"
+
+  if ! command -v jq >/dev/null 2>&1; then
+    log_warn "jq not found; cannot update cache.json."
+    return 0
+  fi
+
+  mkdir -p "${project_root}/.dockauto"
+
+  if command -v flock >/dev/null 2>&1; then
+    (
+      flock 9 || true
+      if [[ -f "$cache_file" ]]; then
+        jq --arg h "${DOCKAUTO_BUILD_HASH}" --argjson entry "$build_entry_json" \
+          '.builds |= (. // {}) | .builds[$h] = $entry' \
+          "$cache_file" >"$tmp_file"
+      else
+        jq --arg h "${DOCKAUTO_BUILD_HASH}" --argjson entry "$build_entry_json" \
+          -n '{builds:{}} | .builds[$h] = $entry' >"$tmp_file"
+      fi
+      mv "$tmp_file" "$cache_file"
+    ) 9>"$lock_file"
+  else
+    log_warn "flock not found; updating cache.json without file lock."
+    if [[ -f "$cache_file" ]]; then
+      jq --arg h "${DOCKAUTO_BUILD_HASH}" --argjson entry "$build_entry_json" \
+        '.builds |= (. // {}) | .builds[$h] = $entry' \
+        "$cache_file" >"$tmp_file"
+    else
+      jq --arg h "${DOCKAUTO_BUILD_HASH}" --argjson entry "$build_entry_json" \
+        -n '{builds:{}} | .builds[$h] = $entry' >"$tmp_file"
+    fi
+    mv "$tmp_file" "$cache_file"
   fi
 }

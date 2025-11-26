@@ -94,10 +94,7 @@ dockauto_cmd_up() {
     log_info "Infra will be kept after up (no auto teardown)."
   fi
 
-  # TODO Step 7:
-  #   - create networks/containers for infra services (role=infra)
-  #   - healthcheck loop
-  #   - handle naming: dockauto_dev_<service>
+  # TODO: dev infra using docker compose (project dockauto_dev)
 }
 
 dockauto_cmd_down() {
@@ -120,4 +117,130 @@ dockauto_cmd_down() {
   log_info "Stopping dev infra (Step 9 logic to be implemented)."
   # TODO:
   #   - stop/remove containers/network with naming pattern dockauto_dev_*
+}
+
+# ====== Step 7 (test) – Resolve infra needed for tests ======
+dockauto_infra_required_for_tests() {
+  local json="${DOCKAUTO_CONFIG_JSON:-}"
+  local names=""
+
+  if [[ -z "$json" || ! -f "$json" ]]; then
+    echo ""
+    return
+  fi
+
+  # If we already have EFFECTIVE_TEST_SUITES, re-use
+  if [[ -z "${DOCKAUTO_EFFECTIVE_TEST_SUITES:-}" ]]; then
+    echo ""
+    return
+  fi
+
+  for suite in ${DOCKAUTO_EFFECTIVE_TEST_SUITES}; do
+    local req
+    req="$(jq -r --arg s "$suite" '."x-dockauto".tests.suites[$s].requires_infra // [] | .[]?' "$json" 2>/dev/null || true)"
+    if [[ -n "$req" ]]; then
+      while IFS= read -r r; do
+        [[ -z "$r" ]] && continue
+        if [[ " $names " != *" $r "* ]]; then
+          names+=" $r"
+        fi
+      done <<< "$req"
+    fi
+  done
+
+  # fallback: if --infra flag nhưng suite không khai requires_infra -> dùng toàn bộ infra services
+  if [[ -z "$names" && "${DOCKAUTO_REQUIRE_INFRA:-0}" -eq 1 ]]; then
+    names="${DOCKAUTO_CFG_INFRA_SERVICES:-}"
+  fi
+
+  echo "$names"
+}
+
+dockauto_step7_provision_infra_for_tests() {
+  if [[ "${DOCKAUTO_CFG_TESTS_ENABLED:-false}" != "true" && "${DOCKAUTO_REQUIRE_INFRA:-0}" -ne 1 ]]; then
+    log_debug "Tests are disabled and --infra not set; skipping infra provision."
+    return 0
+  fi
+
+  local infra_services
+  infra_services="$(dockauto_infra_required_for_tests)"
+  if [[ -z "$infra_services" ]]; then
+    log_info "No infra services required for current test suites; skipping Step 7."
+    return 0
+  fi
+
+  if ! command -v docker >/dev/null 2>&1; then
+    log_error "docker not found; cannot provision infra for tests."
+    return 1
+  fi
+
+  if ! command -v docker-compose >/dev/null 2>&1 && ! docker compose version >/dev/null 2>&1; then
+    log_error "docker compose/docker-compose not found; cannot provision infra for tests."
+    return 1
+  fi
+
+  local project_root="${DOCKAUTO_PROJECT_ROOT:-$(pwd)}"
+  local compose_file="${DOCKAUTO_CONFIG_FILE}"
+
+  local short_hash="${DOCKAUTO_BUILD_HASH:0:12}"
+  local compose_project="dockauto_test_${short_hash}"
+
+  log_info "Provisioning infra for tests (Step 7) using docker compose project: ${compose_project}"
+  log_info "Infra services: ${infra_services}"
+
+  (
+    cd "${project_root}"
+    COMPOSE_PROJECT_NAME="${compose_project}" \
+      dockauto_docker_compose -f "${compose_file}" up -d ${infra_services}
+  )
+
+  # Basic healthcheck loop (if images have HEALTHCHECK)
+  for svc in ${infra_services}; do
+    local container_name="${compose_project}_${svc}_1"
+    log_info "Waiting for infra service '${svc}' (container: ${container_name}) to become healthy (if healthcheck defined)..."
+
+    local max_retries=30
+    local sleep_sec=3
+    local i=0
+    local healthy=0
+
+    while (( i < max_retries )); do
+      if ! docker inspect "${container_name}" >/dev/null 2>&1; then
+        log_warn "Container ${container_name} not found yet..."
+      else
+        local health
+        health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${container_name}" 2>/dev/null || echo "none")"
+        if [[ "$health" == "healthy" || "$health" == "none" ]]; then
+          healthy=1
+          break
+        fi
+      fi
+      ((i++))
+      sleep "${sleep_sec}"
+    done
+
+    if [[ "$healthy" -eq 1 ]]; then
+      log_success "Infra service '${svc}' is ready (or no healthcheck defined)."
+    else
+      log_warn "Timeout waiting for infra service '${svc}' to be healthy."
+    fi
+  done
+
+  mkdir -p "${project_root}/.dockauto"
+  cat >"${project_root}/.dockauto/last_test_infra.json" <<EOF
+{
+  "compose_project": "${compose_project}",
+  "services": [$(printf '"%s",' ${infra_services} | sed 's/,$//')],
+  "build_hash": "${DOCKAUTO_BUILD_HASH}"
+}
+EOF
+}
+
+# ----- helper: docker compose wrapper -----
+dockauto_docker_compose() {
+  if command -v docker-compose >/dev/null 2>&1; then
+    docker-compose "$@"
+  else
+    docker compose "$@"
+  fi
 }

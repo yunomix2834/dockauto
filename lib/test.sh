@@ -86,7 +86,8 @@ dockauto_cmd_test() {
   fi
 
   # TODO:
-  #   - infra_up_for_tests
-  #   - run_tests
-  #   - optional cleanup
+  #   - reuse built image (from cache)
+  #   - dockauto_step7_provision_infra_for_tests
+  #   - run tests inside app container
+  #   - teardown infra (Step 9)
 }

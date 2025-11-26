@@ -5,8 +5,8 @@ set -euo pipefail
 #   FUTURE CALL state machine: VALIDATE -> HASH -> BUILD -> SCAN -> INFRA -> TEST -> CLEANUP
 #   Step 1: CLI & build flags
 #   Step 2: VALIDATE (config + environment)
-#   Step 4: Generate Dockerfile from template (if needed)
-#   Step 3: HASH (CONFIG/SOURCE/BUILD + cache check)
+#   Step 3: Generate Dockerfile from template (if needed)
+#   Step 4: HASH (CONFIG/SOURCE/BUILD + cache check)
 #   Step 5+: BUILD, SCAN, INFRA, TEST, CLEANUP (future)
 
 dockauto_cmd_build_usage() {
@@ -93,7 +93,11 @@ dockauto_cmd_build() {
   dockauto_validate_environment
   dockauto_validate_config
 
-  # ====== Step 3: HASH (CONFIG / SOURCE / BUILD + cache check) ======
+  # ====== Step 3: Ensure/Generate Dockerfile from Template ======
+  source "${DOCKAUTO_ROOT_DIR}/lib/dockerfile.sh"
+  dockauto_ensure_dockerfile
+
+  # ====== Step 4: HASH (CONFIG / SOURCE / BUILD + cache check) ======
   source "${DOCKAUTO_ROOT_DIR}/lib/hash.sh"
 
   dockauto_hash_calculate
@@ -110,33 +114,122 @@ dockauto_cmd_build() {
     log_info "Cache: MISS (no entry for this BUILD_HASH, will build new image in Step 5)."
   fi
 
-  # ====== Step 4+ (Not implement) ======
-  #   - BUILD:   docker build ...
-  #   - SCAN:    dockauto_scan_image ...
-  #   - INFRA:   infra up for tests ...
-  #   - TEST:    run test suites ...
-  #   - CLEANUP: infra teardown ...
+  # ====== Step 5: BUILD image ======
+  dockauto_build_image
 
-  log_info "Starting build pipeline (HASH -> BUILD -> SCAN -> INFRA -> TEST -> CLEANUP in future steps)."
-  log_info "Config file: ${DOCKAUTO_CONFIG_FILE}, profile: ${DOCKAUTO_PROFILE:-default}"
+  # ====== Step 6: SCAN image (optional) ======
+  source "${DOCKAUTO_ROOT_DIR}/lib/scan.sh"
+  if [[ "${no_scan}" -eq 1 ]]; then
+    log_info "Security scan is disabled via --no-scan."
+  else
+    dockauto_scan_image "${DOCKAUTO_IMAGE_TAG}"
+  fi
+
+  # ====== Step 7: Provision infra for tests (optional) ======
+  source "${DOCKAUTO_ROOT_DIR}/lib/infra.sh"
 
   if [[ "${skip_test}" -eq 1 ]]; then
-    log_info "Tests will be skipped."
+    log_info "Tests will be skipped (no infra provisioning for tests)."
   else
-    log_info "Tests will be run (suites: ${DOCKAUTO_EFFECTIVE_TEST_SUITES:-<from config>})."
+    dockauto_provision_infra_for_tests || true
   fi
 
-  if [[ "${no_scan}" -eq 1 ]]; then
-    log_info "Security scan will be skipped."
-  else
-    log_info "Security scan will run (if tools available)."
+  # Step 8/9: Test + cleanup sẽ được implement sau
+  log_info "Build pipeline completed (BUILD + SCAN + INFRA stub)."
+}
+
+dockauto_build_image() {
+  # ====== Step 5: Build image (docker build) ======
+  local project_root="${DOCKAUTO_PROJECT_ROOT:-$(pwd)}"
+  local ctx="${DOCKAUTO_CFG_MAIN_BUILD_CONTEXT:-.}"
+  [[ -z "$ctx" ]] && ctx="."
+  local dockerfile_rel="${DOCKAUTO_CFG_MAIN_DOCKERFILE:-Dockerfile}"
+  local ctx_abs="${project_root}/${ctx%/}"
+  local dockerfile_path="${ctx_abs}/${dockerfile_rel}"
+
+  if [[ ! -f "$dockerfile_path" ]]; then
+    log_error "Dockerfile not found at ${dockerfile_path} (after Step 4)."
+    return 1
   fi
 
-  if [[ "${require_infra}" -eq 1 ]]; then
-    log_info "Infra (db/broker) will be required for tests."
+  local image_name
+  image_name="$(jq -r ".services[\"${DOCKAUTO_CFG_MAIN_SERVICE}\"].image // empty" "${DOCKAUTO_CONFIG_JSON}")"
+  if [[ -z "$image_name" || "$image_name" == "null" ]]; then
+    image_name="${DOCKAUTO_CFG_PROJECT_NAME:-dockauto-app}"
   fi
 
-  if [[ "${ignore_test_failure}" -eq 1 ]]; then
-    log_info "Test failures will not fail the build (ignore-test-failure)."
+  local short_hash="${DOCKAUTO_BUILD_HASH:0:12}"
+  local image_tag="${image_name}:${short_hash}"
+
+  # Build args from config
+  local build_args_json
+  build_args_json="$(jq -c ".services[\"${DOCKAUTO_CFG_MAIN_SERVICE}\"].build.args // {}" "${DOCKAUTO_CONFIG_JSON}")"
+  local build_args=()
+  if [[ "$build_args_json" != "{}" ]]; then
+    while IFS='=' read -r k v; do
+      [[ -z "$k" ]] && continue
+      build_args+=(--build-arg "${k}=${v}")
+    done < <(jq -r 'to_entries[] | "\(.key)=\(.value)"' <<<"$build_args_json")
   fi
+
+  log_info "Building image: ${image_tag}"
+  log_debug "  context   : ${ctx_abs}"
+  log_debug "  dockerfile: ${dockerfile_path}"
+
+  (
+    cd "$ctx_abs"
+    docker build -f "$dockerfile_path" -t "$image_tag" "${build_args[@]}" .
+  )
+
+  # Inspect image info
+  local inspect_json
+  inspect_json="$(docker image inspect "$image_tag" | jq '.[0]')"
+
+  local image_id digest created_at
+  image_id="$(jq -r '.Id' <<<"$inspect_json")"
+  digest="$(jq -r '.RepoDigests[0] // ""' <<<"$inspect_json")"
+  created_at="$(jq -r '.Created' <<<"$inspect_json")"
+
+  log_success "Built image:"
+  log_info "  hash   (build) : ${DOCKAUTO_BUILD_HASH}"
+  log_info "  image tag      : ${image_tag}"
+  log_info "  image id       : ${image_id}"
+  log_info "  digest         : ${digest}"
+  log_info "  created_at     : ${created_at}"
+
+  # Export for later steps
+  export DOCKAUTO_IMAGE_TAG="${image_tag}"
+  export DOCKAUTO_IMAGE_ID="${image_id}"
+
+  # Update cache (Step 5: hash → tag → id → digest → created_at)
+  local build_entry_json
+  build_entry_json="$(
+    jq -n \
+      --arg tag "${image_tag}" \
+      --arg id "${image_id}" \
+      --arg digest "${digest}" \
+      --arg created "${created_at}" \
+      --arg cfg_hash "${DOCKAUTO_CONFIG_HASH}" \
+      --arg src_hash "${DOCKAUTO_SOURCE_HASH}" \
+      --arg tool_ver "${DOCKAUTO_VERSION:-}" \
+      --arg cfg_file "${DOCKAUTO_CONFIG_FILE}" \
+      --arg main_service "${DOCKAUTO_CFG_MAIN_SERVICE}" \
+      '{
+        image_tag: $tag,
+        image_id: $id,
+        digest: $digest,
+        created_at: $created,
+        config_hash: $cfg_hash,
+        source_hash: $src_hash,
+        tool_version: $tool_ver,
+        config_file: $cfg_file,
+        main_service: $main_service
+      }'
+  )"
+
+  dockauto_cache_update_build_entry "${build_entry_json}"
+
+  # Save a small report
+  mkdir -p "${project_root}/.dockauto"
+  cat >"${project_root}/.dockauto/build_report.json" <<<"${build_entry_json}"
 }

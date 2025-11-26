@@ -14,6 +14,7 @@ Commands:
   test      Run tests inside built image
   up        Start dev infrastructure
   down      Stop dev infrastructure
+  setup     Install helper tools (yq, jq, trivy, syft, ...)
   version   Show dockauto version
   help      Show this help
 
@@ -28,6 +29,7 @@ Examples:
   dockauto build --skip-test --no-scan
   dockauto test --test integration
   dockauto up --keep-infra
+  dockauto setup
 
 EOF
 }
@@ -126,6 +128,11 @@ dockauto_main() {
     down)
       source "${DOCKAUTO_ROOT_DIR}/lib/infra.sh"
       dockauto_cmd_down "$@"
+      ;;
+
+    setup)
+      source "${DOCKAUTO_ROOT_DIR}/lib/setup.sh"
+      dockauto_cmd_setup "$@"
       ;;
 
     *)
