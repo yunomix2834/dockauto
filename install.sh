@@ -15,7 +15,7 @@ TEMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TEMP_DIR"' EXIT
 
 # 2. Download binary / script
-curl -fsSL "https://raw.githubusercontent.com/you/dockauto/v${VERSION}/bin/dockauto" -o "${TEMP_DIR}/${BINARY_NAME}"
+curl -fsSL "https://raw.githubusercontent.com/yunomix2834/dockauto/v${VERSION}/bin/dockauto" -o "${TEMP_DIR}/${BINARY_NAME}"
 
 # Grant execute mode to file
 chmod +x "${TEMP_DIR}/${BINARY_NAME}"

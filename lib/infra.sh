@@ -4,7 +4,7 @@ set -euo pipefail
 # dockauto up/down:
 #   Step 1: parse flags
 #   Step 2: VALIDATE config + environment
-#   Step 7/9: infra up / teardown (future)
+#   Step 7/9: infra up / teardown (future for dev), test infra handled separately
 
 dockauto_cmd_up_usage() {
   cat <<'EOF'
@@ -185,6 +185,7 @@ dockauto_provision_infra_for_tests() {
   local short_hash="${DOCKAUTO_BUILD_HASH:0:12}"
   local compose_project="dockauto_test_${short_hash}"
 
+  log_debug "STATE: INFRA"
   log_info "Provisioning infra for tests (Step 7) using docker compose project: ${compose_project}"
   log_info "Infra services: ${infra_services}"
 
@@ -234,6 +235,39 @@ dockauto_provision_infra_for_tests() {
   "build_hash": "${DOCKAUTO_BUILD_HASH}"
 }
 EOF
+
+  log_debug "Recorded test infra metadata at .dockauto/last_test_infra.json"
+}
+
+# ====== Step 9 (test) – Teardown infra ======
+dockauto_teardown_infra_for_tests() {
+  local project_root="${DOCKAUTO_PROJECT_ROOT:-$(pwd)}"
+  local meta_file="${project_root}/.dockauto/last_test_infra.json"
+
+  if [[ ! -f "$meta_file" ]]; then
+    log_debug "No last_test_infra.json found; nothing to teardown."
+    return 0
+  fi
+
+  local compose_project
+  compose_project="$(jq -r '.compose_project // ""' "$meta_file" 2>/dev/null || echo "")"
+
+  if [[ -z "$compose_project" ]]; then
+    log_warn "last_test_infra.json has no compose_project; skipping teardown."
+    return 0
+  fi
+
+  log_debug "STATE: CLEANUP"
+  log_info "Tearing down test infra (compose project: ${compose_project})"
+
+  (
+    cd "${project_root}"
+    COMPOSE_PROJECT_NAME="${compose_project}" \
+      dockauto_docker_compose -f "${DOCKAUTO_CONFIG_FILE}" down --remove-orphans
+  )
+
+  rm -f "$meta_file"
+  log_success "Test infra torn down."
 }
 
 # ----- helper: docker compose wrapper -----

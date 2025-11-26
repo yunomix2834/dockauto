@@ -2,12 +2,16 @@
 set -euo pipefail
 
 # dockauto build:
-#   FUTURE CALL state machine: VALIDATE -> HASH -> BUILD -> SCAN -> INFRA -> TEST -> CLEANUP
+#   State machine: INIT -> VALIDATE -> HASH -> BUILD -> SCAN -> INFRA -> TEST -> CLEANUP
 #   Step 1: CLI & build flags
 #   Step 2: VALIDATE (config + environment)
 #   Step 3: Generate Dockerfile from template (if needed)
 #   Step 4: HASH (CONFIG/SOURCE/BUILD + cache check)
-#   Step 5+: BUILD, SCAN, INFRA, TEST, CLEANUP (future)
+#   Step 5: BUILD image
+#   Step 6: SCAN (optional)
+#   Step 7: INFRA (for tests, optional)
+#   Step 8: TEST (inside built image)
+#   Step 9: CLEANUP infra (for tests)
 
 dockauto_cmd_build_usage() {
   cat <<'EOF'
@@ -29,6 +33,8 @@ EOF
 }
 
 dockauto_cmd_build() {
+  log_debug "STATE: INIT"
+
   # ====== Step 1: Parse build flags ======
   local require_infra=0
   local skip_test=0
@@ -86,6 +92,8 @@ dockauto_cmd_build() {
   log_debug "build: test_suites=${test_suites}"
 
   # ====== Step 2 VALIDATE config + environment ======
+  log_debug "STATE: VALIDATE"
+
   source "${DOCKAUTO_ROOT_DIR}/lib/config.sh"
   source "${DOCKAUTO_ROOT_DIR}/lib/validate.sh"
 
@@ -98,6 +106,7 @@ dockauto_cmd_build() {
   dockauto_ensure_dockerfile
 
   # ====== Step 4: HASH (CONFIG / SOURCE / BUILD + cache check) ======
+  log_debug "STATE: HASH"
   source "${DOCKAUTO_ROOT_DIR}/lib/hash.sh"
 
   dockauto_hash_calculate
@@ -115,9 +124,11 @@ dockauto_cmd_build() {
   fi
 
   # ====== Step 5: BUILD image ======
+  log_debug "STATE: BUILD"
   dockauto_build_image
 
   # ====== Step 6: SCAN image (optional) ======
+  log_debug "STATE: SCAN"
   source "${DOCKAUTO_ROOT_DIR}/lib/scan.sh"
   if [[ "${no_scan}" -eq 1 ]]; then
     log_info "Security scan is disabled via --no-scan."
@@ -125,17 +136,33 @@ dockauto_cmd_build() {
     dockauto_scan_image "${DOCKAUTO_IMAGE_TAG}"
   fi
 
-  # ====== Step 7: Provision infra for tests (optional) ======
+  # ====== Step 7 + 8 + 9: TEST + INFRA + CLEANUP ======
   source "${DOCKAUTO_ROOT_DIR}/lib/infra.sh"
+  source "${DOCKAUTO_ROOT_DIR}/lib/test.sh"
 
   if [[ "${skip_test}" -eq 1 ]]; then
-    log_info "Tests will be skipped (no infra provisioning for tests)."
-  else
-    dockauto_provision_infra_for_tests || true
+    log_info "Tests are skipped via --skip-test (no infra, no tests)."
+    log_debug "STATE: CLEANUP"
+    log_info "Build pipeline completed (BUILD + SCAN)."
+    return 0
   fi
 
-  # Step 8/9: Test + cleanup sẽ được implement sau
-  log_info "Build pipeline completed (BUILD + SCAN + INFRA stub)."
+  log_debug "STATE: TEST"
+
+  # Execute tests with image after build
+  if ! dockauto_run_tests_for_image "${DOCKAUTO_IMAGE_TAG}"; then
+    local rc=$?
+    if [[ "${ignore_test_failure}" -eq 1 ]]; then
+      log_warn "Tests failed (rc=${rc}) but --ignore-test-failure is set; continue."
+    else
+      log_debug "STATE: CLEANUP"
+      log_error "Build pipeline failed due to test failures."
+      return "$rc"
+    fi
+  fi
+
+  log_debug "STATE: CLEANUP"
+  log_success "Build pipeline completed (BUILD + SCAN + TEST)."
 }
 
 dockauto_build_image() {
