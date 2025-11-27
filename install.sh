@@ -13,15 +13,36 @@ if ! command -v curl >/dev/null 2>&1; then
   exit 1
 fi
 
+OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+ARCH="$(uname -m)"
+
+case "$OS" in
+  linux|darwin)
+    ;;
+  *)
+    echo "ERROR: Unsupported OS: ${OS}. Only Linux and macOS are supported for now." >&2
+    exit 1
+    ;;
+esac
+
+if [[ ! -d "${INSTALL_DIR}" ]]; then
+  echo "Install dir ${INSTALL_DIR} does not exist, creating..."
+  if mkdir -p "${INSTALL_DIR}" 2>/dev/null; then
+    :
+  elif command -v sudo >/dev/null 2>&1 && sudo mkdir -p "${INSTALL_DIR}" 2>/dev/null; then
+    :
+  else
+    echo "ERROR: Cannot create ${INSTALL_DIR} (even with sudo)." >&2
+    exit 1
+  fi
+fi
+
 if [[ ! -w "${INSTALL_DIR}" ]]; then
   echo "WARN: ${INSTALL_DIR} is not writable, will use sudo to move binary." >&2
 fi
 
 TEMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TEMP_DIR"' EXIT
-
-OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
-ARCH="$(uname -m)"
 
 URL="https://raw.githubusercontent.com/yunomix2834/dockauto/v${DOCKAUTO_VERSION}/bin/dockauto"
 echo "Downloading from: ${URL}"

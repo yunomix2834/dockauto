@@ -32,6 +32,53 @@ Stops dev infrastructure (containers, networks) created by dockauto up.
 EOF
 }
 
+# ====== Helpers for dev infra ======
+_dockauto_check_port_free() {
+  local port_spec="$1"
+  local host_port="${port_spec%%:*}"
+
+  [[ -z "$host_port" ]] && return 0
+
+  log_debug "Checking host port ${host_port} availability..."
+
+  if command -v lsof >/dev/null 2>&1; then
+    if lsof -iTCP:"$host_port" -sTCP:LISTEN >/dev/null 2>&1; then
+      log_error "Host port ${host_port} appears to be in use. Please choose another port or stop the process."
+      return 1
+    fi
+    elif command -v ss >/dev/null 2>&1; then
+      if ss -ltn "sport = :${host_port}" | tail -n +2 | grep -q .; then
+        log_error "Host port ${host_port} appears to be in use. Please choose another port or stop the process."
+        return 1
+      fi
+    else
+      log_warn "Neither 'lsof' nor 'ss' is available; skipping port check for ${host_port}."
+    fi
+  fi
+}
+
+_dockauto_ensure_network() {
+  local network_name="$1"
+  [[ -z "$network_name" ]] && return 0
+
+  if ! command -v docker >/dev/null 2>&1; then
+    log_warn "docker not available; cannot check/create network '${network_name}'."
+    return 0
+  fi
+
+  if docker network ls --format '{{.Name}}' | grep -qx "${network_name}"; then
+    log_debug "Docker network '${network_name}' already exists."
+    return 0
+  fi
+
+  log_info "Docker network '${network_name}' does not exist; creating..."
+  if docker network create "${network_name}" >/dev/null 2>&1; then
+    log_success "Created Docker network '${network_name}'."
+  else
+    log_warn "Failed to create Docker network '${network_name}'."
+  fi
+}
+
 dockauto_cmd_up() {
   # ====== Step 1: Parse flags ======
   local keep_infra=0
@@ -81,22 +128,65 @@ dockauto_cmd_up() {
   dockauto_validate_environment
   dockauto_validate_config
 
-  log_info "Starting dev infra (up) (Step 7/9 not implemented yet)."
-  log_info "Config file: ${DOCKAUTO_CONFIG_FILE}, profile: ${DOCKAUTO_PROFILE:-default}"
+  local project_root="${DOCKAUTO_PROJECT_ROOT:-$(pwd)}"
+  local compose_file="${DOCKAUTO_CONFIG_FILE}"
+  local infra_services="${DOCKAUTO_CFG_INFRA_SERVICES:-}"
 
+  if [[ -z "$infra_services" ]]; then
+    log_warn "No infra services (x-dockauto.role=infra) defined; nothing to bring up."
+    return 0
+  fi
+
+  # Check port & network if user needs
   if [[ -n "${port_spec}" ]]; then
-    log_info "Will check port availability: ${port_spec} (TODO: implement in Step 7)."
+    if ! _dockauto_check_port_free "${port_spec}"; then
+      return 1
+    fi
   fi
 
   if [[ -n "${network_name}" ]]; then
-    log_info "Will check/create network: ${network_name} (TODO: implement in Step 7)."
+    _dockauto_ensure_network "${network_name}"
   fi
+
+  local dev_project_name="${DOCKAUTO_CFG_PROJECT_NAME:-dockauto}"
+  local compose_project="dockauto_dev_${dev_project_name}"
+
+  log_info "Starting dev infra (dockauto up) using compose project: ${compose_project}"
+  log_info "Config file: ${compose_file}, profile: ${DOCKAUTO_PROFILE:-default}"
+  log_info "Infra services: ${infra_services}"
+
+  if ! command -v docker >/dev/null 2>&1; then
+    log_error "docker not found; cannot start dev infra."
+    return 1
+  fi
+
+  if ! command -v docker-compose >/dev/null 2>&1 && ! docker compose version >/dev/null 2>&1; then
+    log_error "docker compose/docker-compose not found; cannot start dev infra."
+    return 1
+  fi
+
+  (
+    cd "${project_root}"
+    COMPOSE_PROJECT_NAME="${compose_project}" \
+      dockauto_docker_compose -f "${compose_file}" up -d ${infra_services}
+  )
+
+  mkdir -p "${project_root}/.dockauto"
+  cat >"${project_root}/.dockauto/last_dev_infra.json" <<EOF
+{
+  "compose_project": "${compose_project}",
+  "services": [$(printf '"%s",' ${infra_services} | sed 's/,$//')],
+  "config_file": "${compose_file}"
+}
+EOF
 
   if [[ "${keep_infra}" -eq 1 ]]; then
-    log_info "Infra will be kept after up (no auto teardown)."
+    log_info "Dev infra will be kept running until you run 'dockauto down'."
+  else
+    log_info "Dev infra started. Use 'dockauto down' to stop it."
   fi
 
-  # TODO: dev infra using docker compose (project dockauto_dev)
+  log_success "dockauto up completed."
 }
 
 dockauto_cmd_down() {
@@ -115,10 +205,48 @@ dockauto_cmd_down() {
     esac
   done
 
-  # Step 9 (future)
-  log_info "Stopping dev infra (Step 9 logic to be implemented)."
-  # TODO:
-  #   - stop/remove containers/network with naming pattern dockauto_dev_*
+  local project_root="${DOCKAUTO_PROJECT_ROOT:-$(pwd)}"
+  local meta_file="${project_root}/.dockauto/last_dev_infra.json"
+
+  if [[ ! -f "$meta_file" ]]; then
+    log_warn "No dev infra metadata found (.dockauto/last_dev_infra.json); nothing to teardown."
+    return 0
+  fi
+
+  local compose_project
+  compose_project="$(jq -r '.compose_project // ""' "$meta_file" 2>/dev/null || echo "")"
+  local cfg_file
+  cfg_file="$(jq -r '.config_file // ""' "$meta_file" 2>/dev/null || echo "")"
+
+  if [[ -z "$compose_project" ]]; then
+    log_warn "last_dev_infra.json has no compose_project; skipping teardown."
+    return 0
+  fi
+
+  # If does not save the config_file -> fallback use current DOCKAUTO_CONFIG_FIL
+  local compose_file="${cfg_file:-${DOCKAUTO_CONFIG_FILE}}"
+
+  log_info "Stopping dev infra (compose project: ${compose_project})"
+  log_debug "Using compose file: ${compose_file}"
+
+  if ! command -v docker >/dev/null 2>&1; then
+    log_error "docker not found; cannot teardown dev infra."
+    return 1
+  fi
+
+  if ! command -v docker-compose >/dev/null 2>&1 && ! docker compose version >/dev/null 2>&1; then
+    log_error "docker compose/docker-compose not found; cannot teardown dev infra."
+    return 1
+  fi
+
+  (
+    cd "${project_root}"
+    COMPOSE_PROJECT_NAME="${compose_project}" \
+      dockauto_docker_compose -f "${compose_file}" down --remove-orphans
+  )
+
+  rm -f "$meta_file"
+  log_success "Dev infra torn down."
 }
 
 # ====== Step 7 (test) – Resolve infra needed for tests ======
@@ -150,7 +278,7 @@ dockauto_infra_required_for_tests() {
     fi
   done
 
-  # fallback: if --infra flag nhưng suite không khai requires_infra -> dùng toàn bộ infra services
+  # fallback: if --infra flag nhưng suite but not requires_infra -> use all infra services
   if [[ -z "$names" && "${DOCKAUTO_REQUIRE_INFRA:-0}" -eq 1 ]]; then
     names="${DOCKAUTO_CFG_INFRA_SERVICES:-}"
   fi
