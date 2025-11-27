@@ -11,10 +11,16 @@ dockauto_hash_calculate() {
   local project_root="${DOCKAUTO_PROJECT_ROOT:-$(pwd)}"
   local config_file="${DOCKAUTO_CONFIG_FILE}"
 
-  if ! command -v sha256sum >/dev/null 2>&1; then
-    log_error "Required command 'sha256sum' not found. Please install coreutils."
+  local sha_cmd=""
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha_cmd="sha256sum"
+  elif command -v shasum >/dev/null 2>&1; then
+    sha_cmd="shasum -a 256"
+  else
+    log_error "Neither 'sha256sum' nor 'shasum' is available. Please install one of them."
     exit 1
   fi
+
   if ! command -v tar >/dev/null 2>&1; then
     log_error "Required command 'tar' not found."
     exit 1
@@ -49,7 +55,7 @@ dockauto_hash_calculate() {
       echo
       echo "TEMPLATE_VERSION=${template_version}"
       echo "DOCKAUTO_VERSION=${DOCKAUTO_VERSION:-}"
-    } | sha256sum | awk '{print $1}'
+    } | eval "$sha_cmd" | awk '{print $1}'
   )"
   export DOCKAUTO_CONFIG_HASH="${config_hash}"
 
@@ -77,17 +83,13 @@ dockauto_hash_calculate() {
       --exclude='./build'
       --exclude='./target'
     )
-
     if [[ -f ".dockautoignore" ]]; then
       tar_args+=(--exclude-from='.dockautoignore')
     fi
-
     "${tar_args[@]}" 2>/dev/null
-  ) | sha256sum | awk '{print $1}' | {
-    read -r source_hash
-    printf '%s' "$source_hash"
-  } >"${project_root}/.dockauto/.source_hash.tmp"
+  ) | eval "$sha_cmd" | awk '{print $1}' >"${project_root}/.dockauto/.source_hash.tmp"
 
+  local source_hash
   source_hash="$(cat "${project_root}/.dockauto/.source_hash.tmp")"
   rm -f "${project_root}/.dockauto/.source_hash.tmp"
 
@@ -95,7 +97,7 @@ dockauto_hash_calculate() {
 
   # Build hash = SHA256 (CONFIG_HASH + SOURCE_HASH)
   local build_hash
-  build_hash="$(printf "%s%s" "${config_hash}" "${source_hash}" | sha256sum | awk '{print $1}')"
+  build_hash="$(printf "%s%s" "${config_hash}" "${source_hash}" | eval "$sha_cmd" | awk '{print $1}')"
   export DOCKAUTO_BUILD_HASH="${build_hash}"
 }
 

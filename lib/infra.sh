@@ -46,14 +46,13 @@ _dockauto_check_port_free() {
       log_error "Host port ${host_port} appears to be in use. Please choose another port or stop the process."
       return 1
     fi
-    elif command -v ss >/dev/null 2>&1; then
-      if ss -ltn "sport = :${host_port}" | tail -n +2 | grep -q .; then
-        log_error "Host port ${host_port} appears to be in use. Please choose another port or stop the process."
-        return 1
-      fi
-    else
-      log_warn "Neither 'lsof' nor 'ss' is available; skipping port check for ${host_port}."
+  elif command -v ss >/dev/null 2>&1; then
+    if ss -ltn "sport = :${host_port}" | tail -n +2 | grep -q .; then
+      log_error "Host port ${host_port} appears to be in use. Please choose another port or stop the process."
+      return 1
     fi
+  else
+    log_warn "Neither 'lsof' nor 'ss' is available; skipping port check for ${host_port}."
   fi
 }
 

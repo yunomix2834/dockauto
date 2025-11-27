@@ -47,7 +47,11 @@ trap 'rm -rf "$TEMP_DIR"' EXIT
 URL="https://raw.githubusercontent.com/yunomix2834/dockauto/v${DOCKAUTO_VERSION}/bin/dockauto"
 echo "Downloading from: ${URL}"
 
-curl -fsSL "$URL" -o "${TEMP_DIR}/${BINARY_NAME}"
+if ! curl -fsSL "$URL" -o "${TEMP_DIR}/${BINARY_NAME}"; then
+  echo "ERROR: Failed to download ${URL}" >&2
+  exit 1
+fi
+
 chmod +x "${TEMP_DIR}/${BINARY_NAME}"
 
 # Use sudo only if needed
