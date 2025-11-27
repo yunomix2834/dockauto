@@ -16,7 +16,7 @@ PROJECT_ROOT="$(pwd)"
 # Export for lib to use
 export DOCKAUTO_ROOT_DIR="${ROOT_DIR}"
 export DOCKAUTO_VERSION
-DOCKAUTO_PROJECT_ROOT="${PROJECT_ROOT}"
+export DOCKAUTO_PROJECT_ROOT="${PROJECT_ROOT}"
 
 # Source for primary lib
 # At least we need cli & utils for Step 1+

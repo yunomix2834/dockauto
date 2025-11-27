@@ -6,6 +6,8 @@ set -euo pipefail
 #   Step 2: VALIDATE config + environment
 #   Step 7/9: infra up / teardown (future for dev), test infra handled separately
 
+declare -a _dockauto_compose_cmd=()
+
 dockauto_cmd_up_usage() {
   cat <<'EOF'
 Usage: dockauto up [options]

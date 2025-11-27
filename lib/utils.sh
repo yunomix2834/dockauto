@@ -13,7 +13,8 @@ _reset='\033[0m'
 # Set DOCKAUTO_VERBOSE, DOCKAUTO_QUIET in cli
 log_debug() {
   if [[ "${DOCKAUTO_VERBOSE:-0}" -eq 1 ]]; then
-    printf "${_blue}[DEBUG]${_reset} %s\n" "$*" >&2
+    _now() { date +"%Y-%m-%d %H:%M:%S"; }
+    printf "${_blue}[$(_now) DEBUG]${_reset} %s\n" "$*" >&2
   fi
 }
 

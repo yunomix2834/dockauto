@@ -132,7 +132,7 @@ dockauto_step_build_scan() {
   # ====== Step 6: SCAN image (optional) ======
   log_debug "STATE: SCAN"
   source "${DOCKAUTO_ROOT_DIR}/lib/scan.sh"
-  if [[ "${no_scan}" -eq 1 ]]; then
+  if [[ "${DOCKAUTO_NO_SCAN:-0}" -eq 1 ]]; then
     log_info "Security scan is disabled via --no-scan."
   else
     dockauto_scan_image "${DOCKAUTO_IMAGE_TAG}"
@@ -144,7 +144,7 @@ dockauto_step_build_tests() {
   source "${DOCKAUTO_ROOT_DIR}/lib/infra.sh"
   source "${DOCKAUTO_ROOT_DIR}/lib/test.sh"
 
-  if [[ "${skip_test}" -eq 1 ]]; then
+  if [[ "${DOCKAUTO_SKIP_TEST:-0}" -eq 1 ]]; then
     log_info "Tests are skipped via --skip-test (no infra, no tests)."
     log_debug "STATE: CLEANUP"
     log_info "Build pipeline completed (BUILD + SCAN)."
@@ -156,7 +156,7 @@ dockauto_step_build_tests() {
   # Execute tests with image after build
   if ! dockauto_run_tests_for_image "${DOCKAUTO_IMAGE_TAG}"; then
     local rc=$?
-    if [[ "${ignore_test_failure}" -eq 1 ]]; then
+    if [[ "${DOCKAUTO_IGNORE_TEST_FAILURE:-0}" -eq 1 ]]; then
       log_warn "Tests failed (rc=${rc}) but --ignore-test-failure is set; continue."
     else
       log_debug "STATE: CLEANUP"

@@ -20,6 +20,9 @@ fi
 TEMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TEMP_DIR"' EXIT
 
+OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+ARCH="$(uname -m)"
+
 URL="https://raw.githubusercontent.com/yunomix2834/dockauto/v${DOCKAUTO_VERSION}/bin/dockauto"
 echo "Downloading from: ${URL}"
 
@@ -29,8 +32,11 @@ chmod +x "${TEMP_DIR}/${BINARY_NAME}"
 # Use sudo only if needed
 if mv "${TEMP_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}" 2>/dev/null; then
   :
+elif sudo mv "${TEMP_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}" 2>/dev/null; then
+  :
 else
-  sudo mv "${TEMP_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"
+  echo "ERROR: Cannot install to ${INSTALL_DIR}, even with sudo." >&2
+  exit 1
 fi
 
 echo "Installed ${BINARY_NAME} -> ${INSTALL_DIR}/${BINARY_NAME}"
