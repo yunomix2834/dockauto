@@ -2,11 +2,18 @@
 set -euo pipefail
 
 # Config
+readonly REPO_OWNER="yunomix2834"
+readonly REPO_NAME="dockauto"
+
 readonly DOCKAUTO_VERSION="${DOCKAUTO_VERSION:-0.1.0}"
 readonly INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
+readonly LIB_DIR="${LIB_DIR:-/usr/local/lib/dockauto}"
+
 readonly BINARY_NAME="dockauto"
 
 echo "Installing: ${BINARY_NAME} v${DOCKAUTO_VERSION} -> ${INSTALL_DIR}"
+echo "  BIN  -> ${INSTALL_DIR}/${BINARY_NAME}"
+echo "  LIBS -> ${LIB_DIR}"
 
 if ! command -v curl >/dev/null 2>&1; then
   echo "curl is required. Please install curl first." >&2
@@ -25,44 +32,79 @@ case "$OS" in
     ;;
 esac
 
-if [[ ! -d "${INSTALL_DIR}" ]]; then
-  echo "Install dir ${INSTALL_DIR} does not exist, creating..."
-  if mkdir -p "${INSTALL_DIR}" 2>/dev/null; then
-    :
-  elif command -v sudo >/dev/null 2>&1 && sudo mkdir -p "${INSTALL_DIR}" 2>/dev/null; then
-    :
-  else
-    echo "ERROR: Cannot create ${INSTALL_DIR} (even with sudo)." >&2
-    exit 1
+# Ensure install dirs
+ensure_dir() {
+  local dir="$1"
+  if [[ ! -d "${dir}" ]]; then
+    echo "Creating directory: ${dir}"
+    if mkdir -p "${dir}" 2>/dev/null; then
+      :
+    elif command -v sudo >/dev/null 2>&1 && sudo mkdir -p "${dir}" 2>/dev/null; then
+      :
+    else
+      echo "ERROR: Cannot create ${dir} (even with sudo)." >&2
+      exit 1
+    fi
   fi
-fi
+}
 
-if [[ ! -w "${INSTALL_DIR}" ]]; then
-  echo "WARN: ${INSTALL_DIR} is not writable, will use sudo to move binary." >&2
-fi
+ensure_dir "${INSTALL_DIR}"
+ensure_dir "${LIB_DIR}"
 
 TEMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TEMP_DIR"' EXIT
 
-URL="https://raw.githubusercontent.com/yunomix2834/dockauto/v${DOCKAUTO_VERSION}/bin/dockauto"
-echo "Downloading from: ${URL}"
+# Download source tarball for this version
+TARBALL_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/tags/v${DOCKAUTO_VERSION}.tar.gz"
+echo "Downloading source tarball: ${TARBALL_URL}"
 
-if ! curl -fsSL "$URL" -o "${TEMP_DIR}/${BINARY_NAME}"; then
-  echo "ERROR: Failed to download ${URL}" >&2
+if ! curl -fsSL "$TARBALL_URL" -o "${TEMP_DIR}/src.tar.gz"; then
+  echo "ERROR: Failed to download tarball for v${DOCKAUTO_VERSION}." >&2
   exit 1
 fi
 
-chmod +x "${TEMP_DIR}/${BINARY_NAME}"
+echo "Extracting..."
+tar -xzf "${TEMP_DIR}/src.tar.gz" -C "${TEMP_DIR}"
 
-# Use sudo only if needed
-if mv "${TEMP_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}" 2>/dev/null; then
+SRC_ROOT="$(find "${TEMP_DIR}" -maxdepth 1 -type d -name "${REPO_NAME}-*" | head -n1)"
+
+if [[ -z "${SRC_ROOT}" || ! -d "${SRC_ROOT}" ]]; then
+  echo "ERROR: Cannot find extracted source directory." >&2
+  exit 1
+fi
+
+# Copy lib & templates vào LIB_DIR
+echo "Installing libraries to ${LIB_DIR} ..."
+if cp -R "${SRC_ROOT}/lib" "${SRC_ROOT}/templates" "${LIB_DIR}" 2>/dev/null; then
   :
-elif sudo mv "${TEMP_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}" 2>/dev/null; then
+elif command -v sudo >/dev/null 2>&1 && sudo cp -R "${SRC_ROOT}/lib" "${SRC_ROOT}/templates" "${LIB_DIR}"; then
   :
 else
-  echo "ERROR: Cannot install to ${INSTALL_DIR}, even with sudo." >&2
+  echo "ERROR: Cannot copy lib/templates to ${LIB_DIR}, even with sudo." >&2
   exit 1
 fi
 
-echo "Installed ${BINARY_NAME} -> ${INSTALL_DIR}/${BINARY_NAME}"
+# Copy binary
+BIN_SRC="${SRC_ROOT}/bin/${BINARY_NAME}"
+if [[ ! -f "${BIN_SRC}" ]]; then
+  echo "ERROR: Binary script not found at ${BIN_SRC} in tarball." >&2
+  exit 1
+fi
+
+chmod +x "${BIN_SRC}"
+
+echo "Installing binary to ${INSTALL_DIR}/${BINARY_NAME} ..."
+if cp "${BIN_SRC}" "${INSTALL_DIR}/${BINARY_NAME}" 2>/dev/null; then
+  :
+elif command -v sudo >/dev/null 2>&1 && sudo cp "${BIN_SRC}" "${INSTALL_DIR}/${BINARY_NAME}"; then
+  :
+else
+  echo "ERROR: Cannot install binary to ${INSTALL_DIR}, even with sudo." >&2
+  exit 1
+fi
+
+echo "Installed ${BINARY_NAME} v${DOCKAUTO_VERSION}"
+echo "  Binary : ${INSTALL_DIR}/${BINARY_NAME}"
+echo "  LibDir : ${LIB_DIR}"
+echo
 echo "Run: dockauto --version"

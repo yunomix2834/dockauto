@@ -7,8 +7,26 @@ set -euo pipefail
 readonly DOCKAUTO_VERSION="0.1.0"
 
 # Find dockauto's root folder (where lib/, templates/)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# 1) Priority DOCKAUTO_ROOT_DIR
+if [[ -n "${DOCKAUTO_ROOT_DIR:-}" ]]; then
+  ROOT_DIR="${DOCKAUTO_ROOT_DIR}"
+else
+  # 2) Layout dev: bin/.. = project root (lib/, templates/)
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [[ -d "${SCRIPT_DIR}/../lib" ]]; then
+    ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+  # 3) Layout install global: /usr/local/lib/dockauto
+  elif [[ -d "/usr/local/lib/dockauto" ]]; then
+    ROOT_DIR="/usr/local/lib/dockauto"
+  # 4) Else: /opt/dockauto
+  elif [[ -d "/opt/dockauto" ]]; then
+    ROOT_DIR="/opt/dockauto"
+  else
+    echo "ERROR: Cannot locate dockauto lib directory." >&2
+    echo "Hint: set DOCKAUTO_ROOT_DIR to the directory containing 'lib/'." >&2
+    exit 1
+  fi
+fi
 
 # Project root: where user's location
 PROJECT_ROOT="$(pwd)"
